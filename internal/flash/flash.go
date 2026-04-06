@@ -98,6 +98,9 @@ func Flash(opts *FlashOptions) error {
 	flashOpts.ChipType = espflasher.ChipESP32S3
 	f, err := espflasher.New(opts.Port, flashOpts)
 	if err != nil {
+		if strings.Contains(err.Error(), "failed to sync") {
+			return fmt.Errorf("device not in download mode — unplug, hold the BOOT button, plug back in, then release BOOT and retry")
+		}
 		return fmt.Errorf("cannot open serial port %s: %w", opts.Port, err)
 	}
 	defer func() {
