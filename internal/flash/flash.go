@@ -114,6 +114,8 @@ func Flash(opts *FlashOptions) error {
 	} else {
 		output.Info("Flashing firmware only...")
 	}
+	// Clear otadata so bootloader defaults to ota_0
+	images = append(images, espflasher.ImagePart{Data: make([]byte, 0x2000), Offset: 0xf000})
 	images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x20000})
 
 	err = f.FlashImages(images, func(current, total int) {
