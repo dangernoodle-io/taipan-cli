@@ -12,6 +12,8 @@ A companion CLI for managing [TaipanMiner](https://github.com/dangernoodle-io/Ta
 | Command | Description |
 |---------|-------------|
 | `discover` | Find TaipanMiner devices on the local network via mDNS |
+| `config` | Manage configuration profiles (init, get, set, list) |
+| `flash` | Flash firmware and NVS configuration to a device via serial |
 
 ## Install
 

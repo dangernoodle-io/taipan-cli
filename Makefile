@@ -1,7 +1,7 @@
 .PHONY: build test cover lint clean
 
 build:
-	CGO_ENABLED=0 go build -o taipan ./
+	go build -o taipan ./
 
 test:
 	go test ./...
