@@ -1,0 +1,60 @@
+version: 2
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - env:
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - '-s -w -X github.com/dangernoodle-io/taipan-cli/internal/cli.Version={{.Version}}'
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    binary: taipan
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: darwin
+        formats: [zip]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
+  algorithm: sha256
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+release:
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+homebrew_casks:
+  - skip_upload: '{{ if not (envOrDefault "HOMEBREW" "") }}true{{ end }}'
+    repository:
+      owner: dangernoodle-io
+      name: homebrew-tap
+      git:
+        url: 'git@github.com:dangernoodle-io/homebrew-tap.git'
+        private_key: '{{ .Env.SSH_PRIVATE_KEY }}'
+    directory: Casks
+    homepage: https://github.com/dangernoodle-io/taipan-cli
+    description: A companion CLI for managing TaipanMiner devices
+    license: MIT
+    binaries:
+      - taipan
