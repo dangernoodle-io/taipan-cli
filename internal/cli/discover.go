@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -36,6 +37,10 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	sort.Slice(devices, func(i, j int) bool {
+		return devices[i].Hostname < devices[j].Hostname
+	})
 
 	if discoverJSON {
 		return printJSON(devices)
