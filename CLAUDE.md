@@ -23,6 +23,10 @@ taipan
     --port, -p               # serial port
     --profile                # config profile (default: "default")
     --latest                 # pull latest release from GitHub
+  logs [flags]               # stream logs from TaipanMiner devices
+    --host HOSTNAME          # target specific device(s) (repeatable)
+    --all                    # stream logs from all discovered devices
+    --timeout, -t            # discovery timeout in seconds (default 5)
   update                     # trigger OTA firmware update on devices
     --host HOSTNAME          # target specific device(s) (repeatable)
     --all                    # update all discovered devices
