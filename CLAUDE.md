@@ -23,6 +23,10 @@ taipan
     --port, -p               # serial port
     --profile                # config profile (default: "default")
     --latest                 # pull latest release from GitHub
+  update                     # trigger OTA firmware update on devices
+    --host HOSTNAME          # target specific device(s) (repeatable)
+    --all                    # update all discovered devices
+    --timeout, -t            # discovery timeout in seconds (default 5)
 ```
 
 ## Install
@@ -56,4 +60,5 @@ Profile-based configuration at `~/.config/taipan/config.yml`. Profiles define Wi
 | `internal/config/` | Profile config types, YAML load/save, board resolution |
 | `internal/discover/` | mDNS browse + HTTP enrichment |
 | `internal/flash/` | NVS binary gen, GitHub release download, serial flash orchestration |
+| `internal/ota/` | OTA update client (check, trigger, poll status) |
 | `internal/output/` | Colored terminal output |
