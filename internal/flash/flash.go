@@ -2,6 +2,7 @@ package flash
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,8 +39,10 @@ func Flash(opts *FlashOptions) error {
 	}
 
 	cfg, err := config.Load(configPath)
-	if err != nil {
+	if err != nil && errors.Is(err, os.ErrNotExist) {
 		output.Warn("No config found, skipping NVS provisioning (device will enter AP provisioning mode)")
+	} else if err != nil {
+		return fmt.Errorf("config error: %w", err)
 	} else {
 		nvsBin, err = resolveAndBuildNVS(cfg, opts)
 		if err != nil {
