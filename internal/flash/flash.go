@@ -12,6 +12,7 @@ import (
 	"github.com/dangernoodle-io/taipan-cli/internal/config"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
 	espflasher "tinygo.org/x/espflasher/pkg/espflasher"
+	"tinygo.org/x/espflasher/pkg/nvs"
 )
 
 // FlashOptions contains the inputs for a flash operation
@@ -97,13 +98,10 @@ func Flash(opts *FlashOptions) error {
 	}
 	output.Info("Opening serial port: %s", opts.Port)
 	flashOpts := espflasher.DefaultOptions()
-	flashOpts.ResetMode = espflasher.ResetNoReset
+	flashOpts.ResetMode = espflasher.ResetAuto
 	flashOpts.ChipType = espflasher.ChipESP32S3
 	f, err := espflasher.New(opts.Port, flashOpts)
 	if err != nil {
-		if strings.Contains(err.Error(), "failed to sync") {
-			return fmt.Errorf("device not in download mode — unplug, hold the BOOT button, plug back in, then release BOOT and retry")
-		}
 		return fmt.Errorf("cannot open serial port %s: %w", opts.Port, err)
 	}
 	defer func() {
@@ -117,8 +115,13 @@ func Flash(opts *FlashOptions) error {
 	} else {
 		output.Info("Flashing firmware only...")
 	}
-	// Clear otadata so bootloader defaults to ota_0
-	images = append(images, espflasher.ImagePart{Data: make([]byte, 0x2000), Offset: 0xf000})
+	// Erase otadata so bootloader defaults to ota_0.
+	// Use 0xFF (erased flash state) — all-zero otadata looks corrupted to ESP-IDF's bootloader.
+	otadata := make([]byte, 0x2000)
+	for i := range otadata {
+		otadata[i] = 0xFF
+	}
+	images = append(images, espflasher.ImagePart{Data: otadata, Offset: 0xf000})
 	images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x20000})
 
 	err = f.FlashImages(images, func(current, total int) {
@@ -131,7 +134,6 @@ func Flash(opts *FlashOptions) error {
 	fmt.Print("\n")
 	f.Reset()
 	output.Success("Flash complete!")
-	output.Warn("USB CDC does not support hardware reset — unplug and replug the device to boot")
 
 	return nil
 }
@@ -204,7 +206,7 @@ func resolveAndBuildNVS(cfg *config.Config, opts *FlashOptions) ([]byte, error) 
 		resolved.Worker = profileCfg.WorkerPrefix + "-" + suffix
 	}
 
-	entries := []NVSEntry{
+	entries := []nvs.Entry{
 		{Namespace: "taipanminer", Key: "wifi_ssid", Type: "string", Value: resolved.WifiSSID},
 		{Namespace: "taipanminer", Key: "wifi_pass", Type: "string", Value: resolved.WifiPassword},
 		{Namespace: "taipanminer", Key: "pool_host", Type: "string", Value: resolved.PoolHost},
@@ -215,7 +217,7 @@ func resolveAndBuildNVS(cfg *config.Config, opts *FlashOptions) ([]byte, error) 
 		{Namespace: "taipanminer", Key: "provisioned", Type: "u8", Value: uint8(1)},
 	}
 
-	return GenerateNVS(entries, 0x6000)
+	return nvs.GenerateNVS(entries, nvs.DefaultPartSize)
 }
 
 // promptValue reads a single line from stdin, returning the trimmed input

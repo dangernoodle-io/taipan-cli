@@ -87,3 +87,7 @@ Profile-based configuration at `~/.config/taipan/config.yml`. Profiles define Wi
 | `internal/flash/` | NVS binary gen, GitHub release download, serial flash orchestration |
 | `internal/ota/` | OTA update client (check, trigger, poll status) |
 | `internal/output/` | Colored terminal output |
+
+## Dependencies
+
+- `tinygo.org/x/espflasher` (via jgangemi/espflasher fork) — ESP chip flasher and NVS library
