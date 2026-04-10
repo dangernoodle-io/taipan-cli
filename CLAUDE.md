@@ -31,6 +31,26 @@ taipan
     --host HOSTNAME          # target specific device(s) (repeatable)
     --all                    # update all discovered devices
     --timeout, -t            # discovery timeout in seconds (default 5)
+  stats [flags]              # show mining statistics from devices
+    --host HOSTNAME          # target specific device(s) (repeatable)
+    --all                    # query all discovered devices
+    --timeout, -t            # discovery timeout in seconds (default 5)
+    --json                   # output as JSON
+  info [flags]               # show device hardware/firmware info
+    --host HOSTNAME          # target specific device(s) (repeatable)
+    --all                    # query all discovered devices
+    --timeout, -t            # discovery timeout in seconds (default 5)
+    --json                   # output as JSON
+  settings                   # manage remote device settings
+    get [--host HOST]        # get all settings from a device
+    set KEY VALUE [--host HOST] # set a setting on a device
+    --timeout, -t            # discovery timeout in seconds (default 5)
+    --json                   # output as JSON (get only)
+  reboot [flags]             # reboot devices
+    --host HOSTNAME          # target specific device(s) (repeatable)
+    --all                    # reboot all discovered devices
+    --timeout, -t            # discovery timeout in seconds (default 5)
+    --force                  # skip confirmation prompt
 ```
 
 ## Install
@@ -63,6 +83,7 @@ Profile-based configuration at `~/.config/taipan/config.yml`. Profiles define Wi
 | `internal/cli/` | Cobra root + subcommand wiring |
 | `internal/config/` | Profile config types, YAML load/save, board resolution |
 | `internal/discover/` | mDNS browse + HTTP enrichment |
+| `internal/device/` | Device HTTP client (stats, info, settings, reboot) |
 | `internal/flash/` | NVS binary gen, GitHub release download, serial flash orchestration |
 | `internal/ota/` | OTA update client (check, trigger, poll status) |
 | `internal/output/` | Colored terminal output |
