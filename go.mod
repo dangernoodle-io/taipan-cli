@@ -9,7 +9,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.bug.st/serial v1.6.2
 	gopkg.in/yaml.v3 v3.0.1
-	tinygo.org/x/espflasher v0.4.1-0.20260402180359-0c5b1c5a96fc
+	tinygo.org/x/espflasher v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -27,4 +27,4 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 )
 
-replace tinygo.org/x/espflasher => github.com/jgangemi/espflasher v0.0.0-20260406201435-19d929675d82
+replace tinygo.org/x/espflasher => github.com/jgangemi/espflasher v0.0.0-20260410150906-f8b6b1115a70
