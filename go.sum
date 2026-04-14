@@ -11,8 +11,8 @@ github.com/grandcat/zeroconf v1.0.0 h1:uHhahLBKqwWBV6WZUDAT71044vwOTL+McW0mBJvo6
 github.com/grandcat/zeroconf v1.0.0/go.mod h1:lTKmG1zh86XyCoUeIHSA4FJMBwCJiQmGfcP2PdzytEs=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/jgangemi/espflasher v0.0.0-20260410150906-f8b6b1115a70 h1:kRJAfkzl8NR1XxOxrmzuAmqrrdVeCOdpVspP+5REel8=
-github.com/jgangemi/espflasher v0.0.0-20260410150906-f8b6b1115a70/go.mod h1:tr5u08HoE67WD5zxJesCiiVF/R1b6Akz3yXwh5zah8U=
+github.com/jgangemi/espflasher v0.0.0-20260414152003-ccc9cf6969d1 h1:4AhK5WZO3SX7lC7EVmlW6FIKwz3mdGVZeaukYHpljuo=
+github.com/jgangemi/espflasher v0.0.0-20260414152003-ccc9cf6969d1/go.mod h1:tr5u08HoE67WD5zxJesCiiVF/R1b6Akz3yXwh5zah8U=
 github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
