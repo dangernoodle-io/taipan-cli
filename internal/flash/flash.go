@@ -22,6 +22,8 @@ type FlashOptions struct {
 	Profile      string // profile name (default: "default")
 	FirmwarePath string // path to firmware binary, empty = download latest
 	ConfigPath   string // path to config.yml, empty = default
+	Force        bool   // skip pre-flash checks
+	Host         string // device host for OTA check, empty = serial flash
 }
 
 // Flash performs the full flash operation: config resolution → interactive prompting →
@@ -55,6 +57,7 @@ func Flash(opts *FlashOptions) error {
 	// Step 6: Get firmware binary
 	var firmwareBin []byte
 	var cleanupPath string // Track parent temp directory for cleanup
+	var actualFirmwarePath string
 	if opts.FirmwarePath != "" {
 		// Read from provided path
 		data, err := os.ReadFile(opts.FirmwarePath)
@@ -62,6 +65,7 @@ func Flash(opts *FlashOptions) error {
 			return fmt.Errorf("cannot read firmware from %s: %w", opts.FirmwarePath, err)
 		}
 		firmwareBin = data
+		actualFirmwarePath = opts.FirmwarePath
 		output.Info("Loaded firmware from: %s (%d bytes)", opts.FirmwarePath, len(firmwareBin))
 	} else {
 		// Download latest firmware
@@ -76,6 +80,7 @@ func Flash(opts *FlashOptions) error {
 			return fmt.Errorf("cannot read downloaded firmware: %w", err)
 		}
 		firmwareBin = data
+		actualFirmwarePath = asset.Path
 		output.Success("Downloaded %s (%s, %d bytes)", asset.Name, asset.Version, len(firmwareBin))
 
 		// Store parent directory (where temp dir was created) for cleanup
@@ -88,7 +93,7 @@ func Flash(opts *FlashOptions) error {
 		}()
 	}
 
-	// Step 7: Flash via espflasher
+	// Step 7: Detect serial port (needed by precheck for serial chip probe)
 	if opts.Port == "" {
 		detected, err := DetectPort()
 		if err != nil {
@@ -96,10 +101,25 @@ func Flash(opts *FlashOptions) error {
 		}
 		opts.Port = detected
 	}
+
+	// Step 8: Pre-flash checks
+	err = Precheck(opts.Board, actualFirmwarePath, opts.Host, opts.Port, opts.Force)
+	if err != nil {
+		return err
+	}
+
+	// Step 9: Flash via espflasher
 	output.Info("Opening serial port: %s", opts.Port)
+
+	// Dispatch chip by board
+	chip, err := ChipForBoard(opts.Board)
+	if err != nil {
+		return err
+	}
+
 	flashOpts := espflasher.DefaultOptions()
 	flashOpts.ResetMode = espflasher.ResetAuto
-	flashOpts.ChipType = espflasher.ChipESP32S3
+	flashOpts.ChipType = chip
 	f, err := espflasher.New(opts.Port, flashOpts)
 	if err != nil {
 		return fmt.Errorf("cannot open serial port %s: %w", opts.Port, err)

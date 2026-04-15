@@ -15,6 +15,22 @@ A companion CLI for managing [TaipanMiner](https://github.com/dangernoodle-io/Ta
 | `config` | Manage configuration profiles (init, get, set, list) |
 | `flash` | Flash firmware and NVS configuration to a device via serial |
 
+## Flash Command
+
+### Pre-Flash Checks
+
+The `flash` command performs validation checks before writing to the device:
+
+1. **Firmware Validation** — Verifies the firmware binary contains the correct app descriptor and matches the specified board
+2. **Size Check** — Ensures the binary fits in the OTA partition (1.875 MB)
+3. **Device Cross-Check** — For OTA updates (via `--host`), verifies the remote device board matches `--board`. For serial flashing, validates the chip type matches the board
+
+To skip these checks, use the `--force` flag:
+
+```shell
+taipan flash --board bitaxe-601 --force firmware.bin
+```
+
 ## Install
 
 ### From Source

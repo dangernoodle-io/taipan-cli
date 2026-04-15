@@ -27,4 +27,4 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 )
 
-replace tinygo.org/x/espflasher => github.com/jgangemi/espflasher v0.0.0-20260414152003-ccc9cf6969d1
+replace tinygo.org/x/espflasher => github.com/jgangemi/espflasher v0.0.0-20260414233019-54b8084f002f
