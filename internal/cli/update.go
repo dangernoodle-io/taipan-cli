@@ -64,17 +64,20 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Update each device serially, collecting errors but continuing
+	// Update each device serially. Surface every per-device failure inline so
+	// a miner that errors early (e.g. /api/ota/check 500) doesn't silently
+	// disappear from the output behind the single "Error: ..." tail.
 	var updateErrors []error
 	for _, device := range targetDevices {
 		if err := updateDevice(device); err != nil {
+			output.Error("%v", err)
 			updateErrors = append(updateErrors, err)
 		}
 	}
 
-	// Return first error encountered
 	if len(updateErrors) > 0 {
-		return updateErrors[0]
+		return fmt.Errorf("%d of %d device(s) failed to update",
+			len(updateErrors), len(targetDevices))
 	}
 
 	return nil
