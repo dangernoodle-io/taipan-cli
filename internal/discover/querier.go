@@ -3,6 +3,7 @@ package discover
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -10,7 +11,11 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-var httpClient = &http.Client{Timeout: 3 * time.Second}
+// Enrichment timeout needs to cover miners under mining load — /api/info
+// composes state under a mutex and can take a second or more. A too-tight
+// timeout was causing enrichment to fail silently and leaving info.Version
+// pinned to the (potentially stale) mDNS TXT value.
+var httpClient = &http.Client{Timeout: 8 * time.Second}
 
 type apiInfoResponse struct {
 	Board      string `json:"board"`
@@ -35,25 +40,45 @@ func deviceFromEntry(e *zeroconf.ServiceEntry) DeviceInfo {
 	info.Version = txt["version"]
 	info.MAC = txt["mac"]
 
-	// Enrich from /api/info (adds worker_name not in TXT)
+	// Enrich from /api/info (adds worker_name not in TXT). Fall back to the
+	// lightweight plain-text /api/version so we always refresh info.Version
+	// even when /api/info times out.
 	if info.IP != "" {
-		url := fmt.Sprintf("http://%s:%d/api/info", info.IP, info.Port)
-		if resp, err := httpClient.Get(url); err == nil {
-			defer func() { _ = resp.Body.Close() }()
-			var apiResp apiInfoResponse
-			if json.NewDecoder(resp.Body).Decode(&apiResp) == nil {
-				if apiResp.Board != "" {
-					info.Board = apiResp.Board
+		infoOK := false
+		infoURL := fmt.Sprintf("http://%s:%d/api/info", info.IP, info.Port)
+		if resp, err := httpClient.Get(infoURL); err == nil {
+			func() {
+				defer func() { _ = resp.Body.Close() }()
+				var apiResp apiInfoResponse
+				if json.NewDecoder(resp.Body).Decode(&apiResp) == nil {
+					if apiResp.Board != "" {
+						info.Board = apiResp.Board
+					}
+					if apiResp.Version != "" {
+						info.Version = apiResp.Version
+					}
+					if apiResp.MAC != "" {
+						info.MAC = apiResp.MAC
+					}
+					if apiResp.WorkerName != "" {
+						info.Worker = apiResp.WorkerName
+					}
+					infoOK = true
 				}
-				if apiResp.Version != "" {
-					info.Version = apiResp.Version
-				}
-				if apiResp.MAC != "" {
-					info.MAC = apiResp.MAC
-				}
-				if apiResp.WorkerName != "" {
-					info.Worker = apiResp.WorkerName
-				}
+			}()
+		}
+		if !infoOK {
+			verURL := fmt.Sprintf("http://%s:%d/api/version", info.IP, info.Port)
+			if resp, err := httpClient.Get(verURL); err == nil {
+				func() {
+					defer func() { _ = resp.Body.Close() }()
+					if b, err := io.ReadAll(resp.Body); err == nil {
+						v := strings.TrimSpace(string(b))
+						if v != "" {
+							info.Version = v
+						}
+					}
+				}()
 			}
 		}
 	}

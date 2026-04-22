@@ -115,6 +115,58 @@ func (c *Client) Trigger(ctx context.Context) (*TriggerResult, int, error) {
 	return &result, resp.StatusCode, nil
 }
 
+// FetchVersion queries the device's /api/version plain-text endpoint and
+// returns the trimmed version string. Uses a short per-request timeout
+// independent of the client's default so the caller can drive its own polling.
+func (c *Client) FetchVersion(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/version", nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+	v := ""
+	for _, r := range string(b) {
+		if r == '\n' || r == '\r' {
+			continue
+		}
+		v += string(r)
+	}
+	return v, nil
+}
+
+// WaitForBoot polls /api/version until the device responds with a non-empty
+// version string or the context deadline fires. Intended for use after an OTA
+// triggers a reboot so callers can display the actually-booted version.
+func (c *Client) WaitForBoot(ctx context.Context, interval time.Duration) (string, error) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// Attempt immediately instead of waiting a full tick.
+	for {
+		reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		v, err := c.FetchVersion(reqCtx)
+		cancel()
+		if err == nil && v != "" {
+			return v, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 // PollStatus queries the device for the current OTA update status.
 func (c *Client) PollStatus(ctx context.Context) (*StatusResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/ota/status", nil)

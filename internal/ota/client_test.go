@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -433,4 +434,75 @@ func TestPollStatus_ContextCancellation(t *testing.T) {
 
 	assert.Nil(t, result)
 	assert.Error(t, err)
+}
+
+// TestFetchVersion_Success tests FetchVersion happy path.
+func TestFetchVersion_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/version", r.URL.Path)
+		_, _ = w.Write([]byte("v0.7.5\n"))
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	v, err := client.FetchVersion(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "v0.7.5", v)
+}
+
+// TestFetchVersion_Non200 returns error.
+func TestFetchVersion_Non200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	v, err := client.FetchVersion(context.Background())
+	assert.Error(t, err)
+	assert.Empty(t, v)
+}
+
+// TestWaitForBoot_ReadyImmediately returns without waiting a full interval.
+func TestWaitForBoot_ReadyImmediately(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("v0.7.5"))
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	v, err := client.WaitForBoot(ctx, 500*time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, "v0.7.5", v)
+	assert.Less(t, time.Since(start), 1500*time.Millisecond)
+}
+
+// TestWaitForBoot_DeadlineExceeded returns an error when device never responds.
+func TestWaitForBoot_DeadlineExceeded(t *testing.T) {
+	// Use a closed listener so every request fails fast.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+
+	client := NewClient("127.0.0.1", port)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	v, err := client.WaitForBoot(ctx, 100*time.Millisecond)
+	assert.Error(t, err)
+	assert.Empty(t, v)
 }
