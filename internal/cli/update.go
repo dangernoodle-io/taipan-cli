@@ -187,7 +187,7 @@ func updateDevice(device discover.DeviceInfo) error {
 			// Check completion states
 			if status.State == "complete" {
 				fmt.Printf("\n")
-				output.Success("[%s] update completed (%s)", hostname, latestVersion)
+				reportBootedVersion(client, hostname, latestVersion)
 				return nil
 			}
 
@@ -200,11 +200,32 @@ func updateDevice(device discover.DeviceInfo) error {
 			// If not in progress and idle with no error, consider it success
 			if !status.InProgress && status.State == "idle" && status.LastError == "" {
 				fmt.Printf("\n")
-				output.Success("[%s] update completed (%s)", hostname, latestVersion)
+				reportBootedVersion(client, hostname, latestVersion)
 				return nil
 			}
 		}
 	}
+}
+
+// reportBootedVersion polls /api/version after an OTA completes so the user
+// sees the version the device actually rebooted into, not just the cached
+// pre-update "latest" string. Falls back to the expected value if the device
+// doesn't come back before the deadline.
+func reportBootedVersion(client *ota.Client, hostname, expected string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	booted, err := client.WaitForBoot(ctx, 2*time.Second)
+	if err != nil || booted == "" {
+		output.Success("[%s] update completed (expected %s; device not yet responding)", hostname, expected)
+		return
+	}
+	expNorm := strings.TrimPrefix(expected, "v")
+	bootNorm := strings.TrimPrefix(booted, "v")
+	if bootNorm != expNorm {
+		output.Warn("[%s] update completed but booted %s (expected %s)", hostname, booted, expected)
+		return
+	}
+	output.Success("[%s] update completed (%s)", hostname, booted)
 }
 
 func isNetworkError(err error) bool {
