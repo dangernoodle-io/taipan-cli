@@ -160,6 +160,12 @@ func updateDevice(device discover.DeviceInfo) error {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	// The firmware reports state=idle up until the OTA worker task gets
+	// scheduled after the trigger returns, so the first poll can race and
+	// report idle:0% before any work has started. Only trust the idle-means-
+	// done signal once we've observed at least one non-idle status.
+	sawProgress := false
+
 	for {
 		select {
 		case <-pollCtx.Done():
@@ -184,6 +190,10 @@ func updateDevice(device discover.DeviceInfo) error {
 			// Print progress
 			fmt.Printf("\r[%s] %s: %.0f%%\033[K", hostname, status.State, status.ProgressPct)
 
+			if status.InProgress || status.State != "idle" {
+				sawProgress = true
+			}
+
 			// Check completion states
 			if status.State == "complete" {
 				fmt.Printf("\n")
@@ -197,8 +207,10 @@ func updateDevice(device discover.DeviceInfo) error {
 				return fmt.Errorf("[%s] update failed: %s", hostname, status.LastError)
 			}
 
-			// If not in progress and idle with no error, consider it success
-			if !status.InProgress && status.State == "idle" && status.LastError == "" {
+			// If not in progress and idle with no error, consider it success —
+			// but only after we've seen the worker transition into a
+			// non-idle state at least once, to avoid a first-poll race.
+			if sawProgress && !status.InProgress && status.State == "idle" && status.LastError == "" {
 				fmt.Printf("\n")
 				reportBootedVersion(client, hostname, latestVersion)
 				return nil
