@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,30 +11,63 @@ import (
 
 // Config represents the entire taipan configuration.
 type Config struct {
-	Profiles map[string]*Profile `yaml:"profiles"`
+	Wifi     *Wifi                  `yaml:"wifi,omitempty"`
+	Worker   *Worker                `yaml:"worker,omitempty"`
+	Pool     *Pool                  `yaml:"pool,omitempty"`
+	Device   *Device                `yaml:"device,omitempty"`
+	Boards   map[string]*BoardEntry `yaml:"boards,omitempty"`
+	Profiles map[string]*Profile    `yaml:"profiles"`
+}
+
+// Wifi represents global WiFi settings.
+type Wifi struct {
+	SSID     string `yaml:"ssid"`
+	Password string `yaml:"password"`
+}
+
+// Worker represents global worker settings.
+type Worker struct {
+	Prefix *string `yaml:"prefix,omitempty"` // global worker prefix
+	Suffix *string `yaml:"suffix"`           // nil = prompt, "" = no suffix
+}
+
+// Pool represents global pool settings.
+type Pool struct {
+	Host     string `yaml:"host,omitempty"`
+	Port     uint16 `yaml:"port,omitempty"`
+	Password string `yaml:"password,omitempty"`
+}
+
+// Device represents global board-flash-time settings.
+type Device struct {
+	DisplayEn *bool `yaml:"display_en,omitempty"`
 }
 
 // Profile represents a named configuration profile.
 type Profile struct {
-	WifiSSID     string                 `yaml:"wifi_ssid"`
-	WifiPassword string                 `yaml:"wifi_password"`
+	WifiSSID     string                 `yaml:"wifi_ssid,omitempty"`
+	WifiPassword string                 `yaml:"wifi_password,omitempty"`
 	PoolHost     string                 `yaml:"pool_host"`
 	PoolPort     uint16                 `yaml:"pool_port"`
+	PoolPassword string                 `yaml:"pool_password,omitempty"`
 	Wallet       string                 `yaml:"wallet"`
 	WorkerPrefix string                 `yaml:"worker_prefix"`
-	WorkerSuffix *string                `yaml:"worker_suffix"` // nil = prompt, "" = no suffix
+	WorkerSuffix *string                `yaml:"worker_suffix,omitempty"` // nil = prompt, "" = no suffix
 	Boards       map[string]*BoardEntry `yaml:"boards"`
 }
 
 // BoardEntry represents a per-board override within a profile.
 // IsDefault is set to true when the YAML value is just `true`.
 type BoardEntry struct {
-	IsDefault    bool    `yaml:"-"`
-	PoolHost     string  `yaml:"pool_host,omitempty"`
-	PoolPort     uint16  `yaml:"pool_port,omitempty"`
-	Wallet       string  `yaml:"wallet,omitempty"`
-	WorkerName   string  `yaml:"worker_name,omitempty"`
-	WorkerSuffix *string `yaml:"worker_suffix,omitempty"`
+	IsDefault      bool    `yaml:"-"`
+	PoolHost       string  `yaml:"pool_host,omitempty"`
+	PoolPort       uint16  `yaml:"pool_port,omitempty"`
+	PoolPassword   string  `yaml:"pool_password,omitempty"`
+	Wallet         string  `yaml:"wallet,omitempty"`
+	WorkerName     string  `yaml:"worker_name,omitempty"`
+	WorkerPrefix   string  `yaml:"worker_prefix,omitempty"`
+	WorkerSuffix   *string `yaml:"worker_suffix,omitempty"`
+	DisplayEn      *bool   `yaml:"display_en,omitempty"`
 }
 
 // UnmarshalYAML handles both `board: true` and `board: {fields...}` syntax.
@@ -101,14 +135,17 @@ func Save(path string, cfg *Config) error {
 		return fmt.Errorf("cannot create parent directories: %w", err)
 	}
 
-	// Marshal to YAML
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
+	// Marshal to YAML with 2-space indent
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(cfg); err != nil {
 		return fmt.Errorf("cannot marshal config: %w", err)
 	}
+	_ = enc.Close()
 
 	// Write with 0644 permissions
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("cannot write config file: %w", err)
 	}
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"strconv"
@@ -25,7 +26,7 @@ var configCmd = &cobra.Command{
 }
 
 func init() {
-	configCmd.PersistentFlags().StringVar(&profileFlag, "profile", "default", "Configuration profile name")
+	configCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "Configuration profile name (required for profile-level keys)")
 
 	configCmd.AddCommand(initCmd)
 	configCmd.AddCommand(getCmd)
@@ -81,13 +82,46 @@ func runInit(cmd *cobra.Command, args []string) error {
 		Boards: make(map[string]*config.BoardEntry),
 	}
 
-	fmt.Fprint(os.Stderr, "WiFi SSID: ")
-	scanner.Scan()
-	profile.WifiSSID = strings.TrimSpace(scanner.Text())
+	// Check if global WiFi exists; if so, skip per-profile WiFi prompts
+	if cfg.Wifi != nil && cfg.Wifi.SSID != "" {
+		output.Info("Using global wifi (%s)", cfg.Wifi.SSID)
+		// Leave profile.WifiSSID/WifiPassword empty so resolution falls through to global
+	} else {
+		// Prompt for global WiFi on first init, or fall back to per-profile if no global exists
+		if cfg.Wifi == nil {
+			fmt.Fprint(os.Stderr, "WiFi SSID (global): ")
+			scanner.Scan()
+			ssid := strings.TrimSpace(scanner.Text())
+			if ssid != "" {
+				if cfg.Wifi == nil {
+					cfg.Wifi = &config.Wifi{}
+				}
+				cfg.Wifi.SSID = ssid
 
-	fmt.Fprint(os.Stderr, "WiFi Password: ")
-	scanner.Scan()
-	profile.WifiPassword = strings.TrimSpace(scanner.Text())
+				fmt.Fprint(os.Stderr, "WiFi Password (global): ")
+				scanner.Scan()
+				cfg.Wifi.Password = strings.TrimSpace(scanner.Text())
+			} else {
+				// If user doesn't provide global WiFi, prompt per-profile
+				fmt.Fprint(os.Stderr, "WiFi SSID: ")
+				scanner.Scan()
+				profile.WifiSSID = strings.TrimSpace(scanner.Text())
+
+				fmt.Fprint(os.Stderr, "WiFi Password: ")
+				scanner.Scan()
+				profile.WifiPassword = strings.TrimSpace(scanner.Text())
+			}
+		} else {
+			// cfg.Wifi exists but SSID is empty (incomplete global); prompt per-profile
+			fmt.Fprint(os.Stderr, "WiFi SSID: ")
+			scanner.Scan()
+			profile.WifiSSID = strings.TrimSpace(scanner.Text())
+
+			fmt.Fprint(os.Stderr, "WiFi Password: ")
+			scanner.Scan()
+			profile.WifiPassword = strings.TrimSpace(scanner.Text())
+		}
+	}
 
 	fmt.Fprint(os.Stderr, "Pool Host: ")
 	scanner.Scan()
@@ -147,12 +181,13 @@ func runGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	profile, err := cfg.GetProfile(profileFlag)
-	if err != nil {
-		return err
+	// For backwards compatibility: if --profile not set and no leading global segment, use "default"
+	profile := profileFlag
+	if profile == "" && !isGlobalKey(key) {
+		profile = "default"
 	}
 
-	value, err := config.Get(profile, key)
+	value, err := config.Get(cfg, profile, key)
 	if err != nil {
 		return err
 	}
@@ -183,12 +218,13 @@ func runSet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	profile, err := cfg.GetProfile(profileFlag)
-	if err != nil {
-		return err
+	// For backwards compatibility: if --profile not set and no leading global segment, use "default"
+	profile := profileFlag
+	if profile == "" && !isGlobalKey(key) {
+		profile = "default"
 	}
 
-	if err := config.Set(profile, key, value); err != nil {
+	if err := config.Set(cfg, profile, key, value); err != nil {
 		return err
 	}
 
@@ -198,6 +234,16 @@ func runSet(cmd *cobra.Command, args []string) error {
 
 	output.Success("Configuration updated")
 	return nil
+}
+
+// isGlobalKey checks if a key should be routed to global config (no profile required)
+func isGlobalKey(key string) bool {
+	segments := strings.Split(key, ".")
+	if len(segments) == 0 {
+		return false
+	}
+	segment := segments[0]
+	return segment == "wifi" || segment == "worker" || segment == "pool" || segment == "boards"
 }
 
 // listCmd displays the current profile
@@ -218,17 +264,25 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	profile, err := cfg.GetProfile(profileFlag)
+	profile := profileFlag
+	if profile == "" {
+		profile = "default"
+	}
+
+	p, err := cfg.GetProfile(profile)
 	if err != nil {
 		return err
 	}
 
-	// Marshal profile to YAML
-	data, err := yaml.Marshal(profile)
-	if err != nil {
-		return err
+	// Marshal profile to YAML with 2-space indent
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(p); err != nil {
+		return fmt.Errorf("cannot marshal config: %w", err)
 	}
+	_ = enc.Close()
 
-	fmt.Print(string(data))
+	fmt.Print(buf.String())
 	return nil
 }
