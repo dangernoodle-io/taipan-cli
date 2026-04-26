@@ -20,14 +20,15 @@ const (
 
 // Precheck validates firmware against board and device configuration.
 // If force is true, all checks are skipped with a single warning.
-func Precheck(board, binPath, host, port string, force bool) error {
+// If factory is true, validates a factory image; otherwise validates an OTA app-only image.
+func Precheck(board, binPath, host, port string, factory, force bool) error {
 	if force {
 		output.Warn("Skipping pre-flash checks (--force)")
 		return nil
 	}
 
 	// Step 1: Parse app descriptor and verify project name contains board
-	firmwareInfo, err := ParseFirmwareInfo(binPath)
+	firmwareInfo, err := ParseFirmwareInfo(binPath, factory)
 	if err != nil {
 		return fmt.Errorf("cannot parse firmware: %w", err)
 	}
@@ -42,9 +43,20 @@ func Precheck(board, binPath, host, port string, force bool) error {
 	if err != nil {
 		return fmt.Errorf("cannot stat firmware: %w", err)
 	}
-	if stat.Size() > int64(ota0SlotSize) {
-		return fmt.Errorf("firmware size %d exceeds ota_0 slot size %d",
-			stat.Size(), ota0SlotSize)
+
+	if factory {
+		// For factory images, check that the app slice (from 0x20000 to EOF) fits in ota_0 slot
+		appSliceSize := stat.Size() - 0x20000
+		if appSliceSize > int64(ota0SlotSize) {
+			return fmt.Errorf("factory firmware app slice size %d exceeds ota_0 slot size %d",
+				appSliceSize, ota0SlotSize)
+		}
+	} else {
+		// For OTA images, check that the full file fits in ota_0 slot
+		if stat.Size() > int64(ota0SlotSize) {
+			return fmt.Errorf("firmware size %d exceeds ota_0 slot size %d",
+				stat.Size(), ota0SlotSize)
+		}
 	}
 
 	// Step 3: Device cross-check
