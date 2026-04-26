@@ -7,12 +7,15 @@ import (
 )
 
 var (
-	flashBoard   string
-	flashPort    string
-	flashProfile string
-	flashLatest  bool
-	flashForce   bool
-	flashOTA     bool
+	flashBoard       string
+	flashPort        string
+	flashProfile     string
+	flashLatest      bool
+	flashForce       bool
+	flashWifiSSID    string
+	flashWifiPassword string
+	flashYes         bool
+	flashOTA         bool
 )
 
 var flashCmd = &cobra.Command{
@@ -28,7 +31,10 @@ func init() {
 	flashCmd.Flags().StringVar(&flashProfile, "profile", "default", "Config profile")
 	flashCmd.Flags().BoolVar(&flashLatest, "latest", false, "Pull latest release from GitHub")
 	flashCmd.Flags().BoolVar(&flashForce, "force", false, "Skip pre-flash checks")
-	flashCmd.Flags().BoolVar(&flashOTA, "ota", false, "Download the OTA app-only image instead of the factory image")
+	flashCmd.Flags().StringVar(&flashWifiSSID, "wifi-ssid", "", "Override WiFi SSID")
+	flashCmd.Flags().StringVar(&flashWifiPassword, "wifi-password", "", "Override WiFi password")
+	flashCmd.Flags().BoolVarP(&flashYes, "yes", "y", false, "Skip confirmation prompt")
+	flashCmd.Flags().BoolVar(&flashOTA, "ota", false, "Flash OTA app-only image (default: factory image)")
 	_ = flashCmd.MarkFlagRequired("board")
 
 	rootCmd.AddCommand(flashCmd)
@@ -48,6 +54,9 @@ func runFlash(cmd *cobra.Command, args []string) error {
 		Profile:      flashProfile,
 		FirmwarePath: firmwarePath,
 		Force:        flashForce,
+		WifiSSID:     flashWifiSSID,
+		WifiPassword: flashWifiPassword,
+		SkipConfirm:  flashYes,
 		Factory:      !flashOTA,
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
 	espflasher "tinygo.org/x/espflasher/pkg/espflasher"
 	"tinygo.org/x/espflasher/pkg/nvs"
+	"golang.org/x/term"
 )
 
 // FlashOptions contains the inputs for a flash operation
@@ -24,6 +25,9 @@ type FlashOptions struct {
 	ConfigPath   string // path to config.yml, empty = default
 	Force        bool   // skip pre-flash checks
 	Host         string // device host for OTA check, empty = serial flash
+	WifiSSID     string // override resolved wifi SSID
+	WifiPassword string // override resolved wifi password
+	SkipConfirm  bool   // skip confirmation prompt (--yes flag)
 	Factory      bool   // flash factory image (default); false = OTA app-only
 }
 
@@ -135,25 +139,27 @@ func Flash(opts *FlashOptions) error {
 
 	var images []espflasher.ImagePart
 	if opts.Factory {
-		// Factory image: flash at offset 0x0 (includes bootloader, partition table, otadata).
-		// NVS, when present, overlays the empty NVS region in the factory image.
+		// Factory image: flash at offset 0x0 (includes bootloader, partition table, etc.)
 		if nvsBin != nil {
 			output.Info("Flashing factory image + NVS...")
+			// NVS overlays the empty NVS in the factory image
 			images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x0})
 			images = append(images, espflasher.ImagePart{Data: nvsBin, Offset: 0x9000})
 		} else {
 			output.Info("Flashing factory image only...")
 			images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x0})
 		}
+		// Factory image already includes otadata, so skip otadata erase
 	} else {
-		// OTA app-only: erase otadata so bootloader defaults to ota_0, then write app at 0x20000.
-		// Use 0xFF (erased flash state) — all-zero otadata looks corrupted to ESP-IDF's bootloader.
+		// OTA app-only: current behavior (otadata erase + app at 0x20000)
 		if nvsBin != nil {
 			output.Info("Flashing OTA app + NVS...")
 			images = append(images, espflasher.ImagePart{Data: nvsBin, Offset: 0x9000})
 		} else {
 			output.Info("Flashing OTA app only...")
 		}
+		// Erase otadata so bootloader defaults to ota_0.
+		// Use 0xFF (erased flash state) — all-zero otadata looks corrupted to ESP-IDF's bootloader.
 		otadata := make([]byte, 0x2000)
 		for i := range otadata {
 			otadata[i] = 0xFF
@@ -184,14 +190,17 @@ func resolveAndBuildNVS(cfg *config.Config, opts *FlashOptions) ([]byte, error) 
 		profile = "default"
 	}
 
-	profileCfg, err := cfg.GetProfile(profile)
-	if err != nil {
-		return nil, fmt.Errorf("cannot get profile %q: %w", profile, err)
-	}
-
-	resolved, err := config.ResolveBoard(profileCfg, opts.Board)
+	resolved, err := config.ResolveBoard(cfg, profile, opts.Board)
 	if err != nil {
 		return nil, fmt.Errorf("cannot resolve board %q: %w", opts.Board, err)
+	}
+
+	// Apply CLI overrides for wifi if provided
+	if opts.WifiSSID != "" {
+		resolved.WifiSSID = opts.WifiSSID
+	}
+	if opts.WifiPassword != "" {
+		resolved.WifiPassword = opts.WifiPassword
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -241,7 +250,23 @@ func resolveAndBuildNVS(cfg *config.Config, opts *FlashOptions) ([]byte, error) 
 		if suffix == "" {
 			return nil, fmt.Errorf("worker suffix cannot be empty")
 		}
-		resolved.Worker = profileCfg.WorkerPrefix + "-" + suffix
+		// Assemble worker from resolved prefix + suffix
+		prefix := resolved.WorkerPrefix
+		if prefix != "" {
+			resolved.Worker = prefix + "-" + suffix
+		} else {
+			resolved.Worker = suffix
+		}
+	}
+
+	// Confirm resolved configuration
+	if err := confirmResolved(resolved, opts.Board, profile, opts.SkipConfirm); err != nil {
+		return nil, err
+	}
+
+	displayEnValue := uint8(0)
+	if resolved.DisplayEn {
+		displayEnValue = 1
 	}
 
 	entries := []nvs.Entry{
@@ -249,13 +274,63 @@ func resolveAndBuildNVS(cfg *config.Config, opts *FlashOptions) ([]byte, error) 
 		{Namespace: "taipanminer", Key: "wifi_pass", Type: "string", Value: resolved.WifiPassword},
 		{Namespace: "taipanminer", Key: "pool_host", Type: "string", Value: resolved.PoolHost},
 		{Namespace: "taipanminer", Key: "pool_port", Type: "u16", Value: resolved.PoolPort},
+		{Namespace: "taipanminer", Key: "pool_pass", Type: "string", Value: resolved.PoolPassword},
 		{Namespace: "taipanminer", Key: "wallet_addr", Type: "string", Value: resolved.Wallet},
 		{Namespace: "taipanminer", Key: "worker", Type: "string", Value: resolved.Worker},
-		{Namespace: "taipanminer", Key: "pool_pass", Type: "string", Value: "x"},
+		{Namespace: "taipanminer", Key: "display_en", Type: "u8", Value: displayEnValue},
 		{Namespace: "taipanminer", Key: "provisioned", Type: "u8", Value: uint8(1)},
 	}
 
 	return nvs.GenerateNVS(entries, nvs.DefaultPartSize)
+}
+
+// confirmResolved prints the resolved NVS configuration and prompts for confirmation.
+// If skip is true, returns nil immediately.
+// If stdin is not a TTY, returns nil (non-interactive, suitable for CI).
+// Otherwise, prompts on stderr for confirmation. Empty/y/Y/yes proceeds; anything else aborts.
+func confirmResolved(resolved *config.ResolvedConfig, board, profile string, skip bool) error {
+	if skip {
+		return nil
+	}
+
+	// Check if stdin is a TTY
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return nil
+	}
+
+	// Print resolved config table to stderr
+	fmt.Fprintf(os.Stderr, "\nResolved NVS config for %s (profile=%s):\n", board, profile)
+	fmt.Fprintf(os.Stderr, "  wifi.ssid       %s\n", resolved.WifiSSID)
+	fmt.Fprintf(os.Stderr, "  wifi.password   ********\n") // masked
+	fmt.Fprintf(os.Stderr, "  pool.host       %s\n", resolved.PoolHost)
+	fmt.Fprintf(os.Stderr, "  pool.port       %d\n", resolved.PoolPort)
+	fmt.Fprintf(os.Stderr, "  pool.password   ********\n") // masked
+
+	// Truncate wallet to first 13 chars + "..."
+	wallet := resolved.Wallet
+	if len(wallet) > 13 {
+		wallet = wallet[:13] + "..."
+	}
+	fmt.Fprintf(os.Stderr, "  pool.wallet     %s\n", wallet)
+	fmt.Fprintf(os.Stderr, "  worker          %s\n", resolved.Worker)
+	displayEnStr := "false"
+	if resolved.DisplayEn {
+		displayEnStr = "true"
+	}
+	fmt.Fprintf(os.Stderr, "  display_en      %s\n", displayEnStr)
+
+	// Prompt for confirmation
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Fprint(os.Stderr, "\nProceed? [Y/n]: ")
+	scanner.Scan()
+	response := strings.ToLower(strings.TrimSpace(scanner.Text()))
+
+	// Empty, y, Y, or yes means proceed
+	if response == "" || response == "y" || response == "yes" {
+		return nil
+	}
+
+	return errors.New("aborted by user")
 }
 
 // promptValue reads a single line from stdin, returning the trimmed input
