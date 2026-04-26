@@ -24,6 +24,7 @@ type FlashOptions struct {
 	ConfigPath   string // path to config.yml, empty = default
 	Force        bool   // skip pre-flash checks
 	Host         string // device host for OTA check, empty = serial flash
+	Factory      bool   // flash factory image (default); false = OTA app-only
 }
 
 // Flash performs the full flash operation: config resolution → interactive prompting →
@@ -69,8 +70,12 @@ func Flash(opts *FlashOptions) error {
 		output.Info("Loaded firmware from: %s (%d bytes)", opts.FirmwarePath, len(firmwareBin))
 	} else {
 		// Download latest firmware
-		output.Info("Downloading latest firmware for board: %s", opts.Board)
-		asset, err := DownloadLatestFirmware(opts.Board)
+		fwType := "factory"
+		if !opts.Factory {
+			fwType = "OTA"
+		}
+		output.Info("Downloading latest %s firmware for board: %s", fwType, opts.Board)
+		asset, err := DownloadLatestFirmware(opts.Board, opts.Factory)
 		if err != nil {
 			return fmt.Errorf("cannot download firmware: %w", err)
 		}
@@ -103,7 +108,7 @@ func Flash(opts *FlashOptions) error {
 	}
 
 	// Step 8: Pre-flash checks
-	err = Precheck(opts.Board, actualFirmwarePath, opts.Host, opts.Port, opts.Force)
+	err = Precheck(opts.Board, actualFirmwarePath, opts.Host, opts.Port, opts.Factory, opts.Force)
 	if err != nil {
 		return err
 	}
@@ -129,20 +134,33 @@ func Flash(opts *FlashOptions) error {
 	}()
 
 	var images []espflasher.ImagePart
-	if nvsBin != nil {
-		output.Info("Flashing NVS and firmware...")
-		images = append(images, espflasher.ImagePart{Data: nvsBin, Offset: 0x9000})
+	if opts.Factory {
+		// Factory image: flash at offset 0x0 (includes bootloader, partition table, otadata).
+		// NVS, when present, overlays the empty NVS region in the factory image.
+		if nvsBin != nil {
+			output.Info("Flashing factory image + NVS...")
+			images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x0})
+			images = append(images, espflasher.ImagePart{Data: nvsBin, Offset: 0x9000})
+		} else {
+			output.Info("Flashing factory image only...")
+			images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x0})
+		}
 	} else {
-		output.Info("Flashing firmware only...")
+		// OTA app-only: erase otadata so bootloader defaults to ota_0, then write app at 0x20000.
+		// Use 0xFF (erased flash state) — all-zero otadata looks corrupted to ESP-IDF's bootloader.
+		if nvsBin != nil {
+			output.Info("Flashing OTA app + NVS...")
+			images = append(images, espflasher.ImagePart{Data: nvsBin, Offset: 0x9000})
+		} else {
+			output.Info("Flashing OTA app only...")
+		}
+		otadata := make([]byte, 0x2000)
+		for i := range otadata {
+			otadata[i] = 0xFF
+		}
+		images = append(images, espflasher.ImagePart{Data: otadata, Offset: 0xf000})
+		images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x20000})
 	}
-	// Erase otadata so bootloader defaults to ota_0.
-	// Use 0xFF (erased flash state) — all-zero otadata looks corrupted to ESP-IDF's bootloader.
-	otadata := make([]byte, 0x2000)
-	for i := range otadata {
-		otadata[i] = 0xFF
-	}
-	images = append(images, espflasher.ImagePart{Data: otadata, Offset: 0xf000})
-	images = append(images, espflasher.ImagePart{Data: firmwareBin, Offset: 0x20000})
 
 	err = f.FlashImages(images, func(current, total int) {
 		fmt.Printf("\rFlashing: %d/%d bytes", current, total)

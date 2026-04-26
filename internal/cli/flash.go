@@ -12,6 +12,7 @@ var (
 	flashProfile string
 	flashLatest  bool
 	flashForce   bool
+	flashOTA     bool
 )
 
 var flashCmd = &cobra.Command{
@@ -27,6 +28,7 @@ func init() {
 	flashCmd.Flags().StringVar(&flashProfile, "profile", "default", "Config profile")
 	flashCmd.Flags().BoolVar(&flashLatest, "latest", false, "Pull latest release from GitHub")
 	flashCmd.Flags().BoolVar(&flashForce, "force", false, "Skip pre-flash checks")
+	flashCmd.Flags().BoolVar(&flashOTA, "ota", false, "Download the OTA app-only image instead of the factory image")
 	_ = flashCmd.MarkFlagRequired("board")
 
 	rootCmd.AddCommand(flashCmd)
@@ -46,6 +48,7 @@ func runFlash(cmd *cobra.Command, args []string) error {
 		Profile:      flashProfile,
 		FirmwarePath: firmwarePath,
 		Force:        flashForce,
+		Factory:      !flashOTA,
 	}
 
 	return flash.Flash(opts)

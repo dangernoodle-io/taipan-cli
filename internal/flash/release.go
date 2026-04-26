@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // ReleaseAsset contains info about a downloaded release asset
@@ -36,9 +35,10 @@ type githubAsset struct {
 }
 
 // DownloadLatestFirmware downloads the latest firmware for a given board from GitHub releases.
-// It looks for an asset matching the board name pattern.
+// If factory is true, downloads taipanminer-<board>-factory.bin (full image);
+// otherwise downloads taipanminer-<board>.bin (app-only OTA image).
 // Returns the path to the downloaded file in a temp directory.
-func DownloadLatestFirmware(board string) (*ReleaseAsset, error) {
+func DownloadLatestFirmware(board string, factory bool) (*ReleaseAsset, error) {
 	// Fetch latest release
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", githubAPIBase, repoOwner, repoName)
 	resp, err := http.Get(url)
@@ -62,22 +62,42 @@ func DownloadLatestFirmware(board string) (*ReleaseAsset, error) {
 		return nil, fmt.Errorf("no releases found")
 	}
 
-	// Find matching asset for board
+	// Build expected asset name
+	var expectedName string
+	var otherName string
+	if factory {
+		expectedName = fmt.Sprintf("taipanminer-%s-factory.bin", board)
+		otherName = fmt.Sprintf("taipanminer-%s.bin", board)
+	} else {
+		expectedName = fmt.Sprintf("taipanminer-%s.bin", board)
+		otherName = fmt.Sprintf("taipanminer-%s-factory.bin", board)
+	}
+
+	// Find exact match for expected asset
 	var matchedAsset *githubAsset
+	var otherTypeExists bool
+	var available []string
 	for i := range release.Assets {
-		if strings.Contains(release.Assets[i].Name, board) {
+		available = append(available, release.Assets[i].Name)
+		if release.Assets[i].Name == expectedName {
 			matchedAsset = &release.Assets[i]
-			break
+		}
+		if release.Assets[i].Name == otherName {
+			otherTypeExists = true
 		}
 	}
 
 	if matchedAsset == nil {
-		// Build list of available assets
-		var available []string
-		for _, asset := range release.Assets {
-			available = append(available, asset.Name)
+		// Build helpful error message
+		errMsg := fmt.Sprintf("no asset %q found; available assets: %v", expectedName, available)
+		if otherTypeExists {
+			if factory {
+				errMsg += " — the OTA image exists, pass --ota to use it"
+			} else {
+				errMsg += " — the factory image exists, omit --ota to use it"
+			}
 		}
-		return nil, fmt.Errorf("no asset found for board '%s'; available assets: %v", board, available)
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 
 	// Create temp directory and download asset
