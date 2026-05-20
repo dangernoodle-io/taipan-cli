@@ -101,7 +101,7 @@ func TestPrecheck_DeviceViaHTTP_Mismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"board":"bitdsk-n8t"}`)
+			_, _ = fmt.Fprint(w, `{"board":"bitaxe-403"}`)
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -125,27 +125,6 @@ func TestPrecheck_ValidFirmwareNoHost(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestPrecheck_N8T_Board(t *testing.T) {
-	tmpDir := t.TempDir()
-	binPath := filepath.Join(tmpDir, "test.bin")
-
-	binData := buildTestBinary(t, "taipanminer-bitdsk-n8t", "v1.0.0", "v4.4.0")
-	require.NoError(t, os.WriteFile(binPath, binData, 0o644))
-
-	// Mock HTTP server for OTA path
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/info" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"board":"bitdsk-n8t"}`)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	err := Precheck("bitdsk-n8t", binPath, server.Listener.Addr().String(), "", false, false)
-	require.NoError(t, err)
-}
 
 func TestPrecheck_Factory_Success(t *testing.T) {
 	tmpDir := t.TempDir()

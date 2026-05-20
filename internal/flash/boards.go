@@ -8,10 +8,11 @@ import (
 
 // boardChipMap maps board names to chip types
 var boardChipMap = map[string]espflasher.ChipType{
-	"bitaxe-601": espflasher.ChipESP32S3,
-	"bitaxe-403": espflasher.ChipESP32S3,
-	"tdongle-s3": espflasher.ChipESP32S3,
-	"bitdsk-n8t": espflasher.ChipESP32C3,
+	"bitaxe-601":    espflasher.ChipESP32S3,
+	"bitaxe-403":    espflasher.ChipESP32S3,
+	"bitaxe-650":    espflasher.ChipESP32S3,
+	"tdongle-s3":    espflasher.ChipESP32S3,
+	"esp32-wroom32": espflasher.ChipESP32,
 }
 
 // ChipForBoard returns the espflasher.ChipType for the given board name.

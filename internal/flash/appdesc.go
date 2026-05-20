@@ -105,7 +105,7 @@ func ParseFirmwareInfo(binPath string, factory bool) (*FirmwareInfo, error) {
 	version := string(versionBytes)
 	idfVer := string(idfVersionBytes)
 
-	// Extract target from project name (e.g., "taipanminer-bitdsk-n8t" -> "bitdsk-n8t")
+	// Extract target from project name (e.g., "taipanminer-bitaxe-601" -> "bitaxe-601")
 	target := extractTarget(projectName)
 
 	return &FirmwareInfo{
@@ -117,7 +117,7 @@ func ParseFirmwareInfo(binPath string, factory bool) (*FirmwareInfo, error) {
 }
 
 // extractTarget extracts the board target from the project name.
-// Expected format: <project>-<board> (e.g., "taipanminer-bitdsk-n8t" -> "bitdsk-n8t")
+// Expected format: <project>-<board> (e.g., "taipanminer-bitaxe-601" -> "bitaxe-601")
 func extractTarget(projectName string) string {
 	parts := strings.Split(projectName, "-")
 	if len(parts) > 1 {
