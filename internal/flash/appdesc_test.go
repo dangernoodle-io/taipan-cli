@@ -99,7 +99,7 @@ func TestExtractTarget(t *testing.T) {
 		expected    string
 	}{
 		{"taipanminer-bitaxe-601", "bitaxe-601"},
-		{"taipanminer-bitdsk-n8t", "bitdsk-n8t"},
+		{"taipanminer-esp32-wroom32", "esp32-wroom32"},
 		{"taipanminer-tdongle-s3", "tdongle-s3"},
 		{"custom-project-name", "project-name"},
 		{"single", "single"},
