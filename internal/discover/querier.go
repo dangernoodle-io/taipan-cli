@@ -3,7 +3,6 @@ package discover
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -40,11 +39,8 @@ func deviceFromEntry(e *zeroconf.ServiceEntry) DeviceInfo {
 	info.Version = txt["version"]
 	info.MAC = txt["mac"]
 
-	// Enrich from /api/info (adds worker_name not in TXT). Fall back to the
-	// lightweight plain-text /api/version so we always refresh info.Version
-	// even when /api/info times out.
+	// Enrich from /api/info (adds worker_name not in TXT).
 	if info.IP != "" {
-		infoOK := false
 		infoURL := fmt.Sprintf("http://%s:%d/api/info", info.IP, info.Port)
 		if resp, err := httpClient.Get(infoURL); err == nil {
 			func() {
@@ -63,23 +59,8 @@ func deviceFromEntry(e *zeroconf.ServiceEntry) DeviceInfo {
 					if apiResp.WorkerName != "" {
 						info.Worker = apiResp.WorkerName
 					}
-					infoOK = true
 				}
 			}()
-		}
-		if !infoOK {
-			verURL := fmt.Sprintf("http://%s:%d/api/version", info.IP, info.Port)
-			if resp, err := httpClient.Get(verURL); err == nil {
-				func() {
-					defer func() { _ = resp.Body.Close() }()
-					if b, err := io.ReadAll(resp.Body); err == nil {
-						v := strings.TrimSpace(string(b))
-						if v != "" {
-							info.Version = v
-						}
-					}
-				}()
-			}
 		}
 	}
 
