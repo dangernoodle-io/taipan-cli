@@ -66,12 +66,8 @@ func Precheck(board, binPath, host, port string, factory, force bool) error {
 			return err
 		}
 	} else {
-		// Serial path: probe chip and compare to board
-		chip, err := ChipForBoard(board)
-		if err != nil {
-			return err
-		}
-		if err := checkDeviceViaProbe(port, chip); err != nil {
+		// Serial path: confirm device is reachable in bootloader
+		if err := checkDeviceViaProbe(port); err != nil {
 			return err
 		}
 	}
@@ -113,10 +109,9 @@ func checkDeviceViaHTTP(host, expectedBoard string) error {
 	return nil
 }
 
-// checkDeviceViaProbe performs a serial-path device cross-check by opening the
-// port, letting espflasher auto-detect the chip, and comparing to the expected
-// ChipType for the target board.
-func checkDeviceViaProbe(port string, expected espflasher.ChipType) error {
+// checkDeviceViaProbe confirms the device is reachable in bootloader mode
+// by opening the serial port with chip auto-detection.
+func checkDeviceViaProbe(port string) error {
 	opts := espflasher.DefaultOptions()
 	opts.ChipType = espflasher.ChipAuto
 	opts.ResetMode = espflasher.ResetAuto
@@ -127,9 +122,6 @@ func checkDeviceViaProbe(port string, expected espflasher.ChipType) error {
 	defer func() {
 		_ = f.Close()
 	}()
-	actual := f.ChipType()
-	if actual != expected {
-		return fmt.Errorf("device chip %s does not match board expected %s", actual, expected)
-	}
+	output.Info("Detected chip: %s", f.ChipType())
 	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,7 +20,7 @@ type FlashOptions struct {
 	Board        string
 	Port         string
 	Profile      string // profile name (default: "default")
-	FirmwarePath string // path to firmware binary, empty = download latest
+	FirmwarePath string // path to firmware binary, empty = download
 	ConfigPath   string // path to config.yml, empty = default
 	Force        bool   // skip pre-flash checks
 	Host         string // device host for OTA check, empty = serial flash
@@ -29,6 +28,7 @@ type FlashOptions struct {
 	WifiPassword string // override resolved wifi password
 	SkipConfirm  bool   // skip confirmation prompt (--yes flag)
 	Factory      bool   // flash factory image (default); false = OTA app-only
+	Version      string // release tag to flash (empty = latest)
 }
 
 // Flash performs the full flash operation: config resolution → interactive prompting →
@@ -61,7 +61,6 @@ func Flash(opts *FlashOptions) error {
 
 	// Step 6: Get firmware binary
 	var firmwareBin []byte
-	var cleanupPath string // Track parent temp directory for cleanup
 	var actualFirmwarePath string
 	if opts.FirmwarePath != "" {
 		// Read from provided path
@@ -73,13 +72,17 @@ func Flash(opts *FlashOptions) error {
 		actualFirmwarePath = opts.FirmwarePath
 		output.Info("Loaded firmware from: %s (%d bytes)", opts.FirmwarePath, len(firmwareBin))
 	} else {
-		// Download latest firmware
+		// Download firmware (cached)
 		fwType := "factory"
 		if !opts.Factory {
 			fwType = "OTA"
 		}
-		output.Info("Downloading latest %s firmware for board: %s", fwType, opts.Board)
-		asset, err := DownloadLatestFirmware(opts.Board, opts.Factory)
+		versionLabel := opts.Version
+		if versionLabel == "" {
+			versionLabel = "latest"
+		}
+		output.Info("Downloading %s %s firmware for board: %s", versionLabel, fwType, opts.Board)
+		asset, err := DownloadFirmware(opts.Board, opts.Factory, opts.Version)
 		if err != nil {
 			return fmt.Errorf("cannot download firmware: %w", err)
 		}
@@ -92,14 +95,8 @@ func Flash(opts *FlashOptions) error {
 		actualFirmwarePath = asset.Path
 		output.Success("Downloaded %s (%s, %d bytes)", asset.Name, asset.Version, len(firmwareBin))
 
-		// Store parent directory (where temp dir was created) for cleanup
-		cleanupPath = asset.Path
-		defer func() {
-			if cleanupPath != "" {
-				// Clean up the temp directory that contains the firmware file
-				_ = os.RemoveAll(filepath.Dir(cleanupPath))
-			}
-		}()
+		// Run background cache prune (non-fatal)
+		go pruneCache(asset.Version)
 	}
 
 	// Step 7: Detect serial port (needed by precheck for serial chip probe)
@@ -120,15 +117,9 @@ func Flash(opts *FlashOptions) error {
 	// Step 9: Flash via espflasher
 	output.Info("Opening serial port: %s", opts.Port)
 
-	// Dispatch chip by board
-	chip, err := ChipForBoard(opts.Board)
-	if err != nil {
-		return err
-	}
-
 	flashOpts := espflasher.DefaultOptions()
 	flashOpts.ResetMode = espflasher.ResetAuto
-	flashOpts.ChipType = chip
+	flashOpts.ChipType = espflasher.ChipAuto
 	f, err := espflasher.New(opts.Port, flashOpts)
 	if err != nil {
 		return fmt.Errorf("cannot open serial port %s: %w", opts.Port, err)

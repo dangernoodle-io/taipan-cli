@@ -19,10 +19,10 @@ taipan
     set KEY VALUE [--profile NAME] # set a config value
     list [--profile NAME]    # print profile as YAML
   flash [firmware.bin]       # flash firmware + NVS config to a device
-    --board, -b              # board type (required)
+    --board, -b              # board type (required); supported boards come from the GitHub release
     --port, -p               # serial port
     --profile                # config profile (default: "default")
-    --latest                 # pull latest release from GitHub
+    --version                # release tag to flash (default: latest); firmware cached 24h under user cache dir
   logs [flags]               # stream logs from TaipanMiner devices
     --host HOSTNAME          # target specific device(s) (repeatable)
     --all                    # stream logs from all discovered devices

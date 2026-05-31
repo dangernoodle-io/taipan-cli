@@ -3,17 +3,18 @@ package flash
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 )
 
 // ReleaseAsset contains info about a downloaded release asset
 type ReleaseAsset struct {
 	Name    string
 	Version string
-	Path    string // local file path after download
+	Path    string   // local file path (from cache)
+	SHA256  string   // lowercase hex sha256 (empty if not provided)
 }
 
 // Package-level variables for GitHub API configuration
@@ -32,30 +33,20 @@ type githubRelease struct {
 type githubAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+	Digest             string `json:"digest"`
 }
 
-// DownloadLatestFirmware downloads the latest firmware for a given board from GitHub releases.
-// If factory is true, downloads taipanminer-<board>-factory.bin (full image);
-// otherwise downloads taipanminer-<board>.bin (app-only OTA image).
-// Returns the path to the downloaded file in a temp directory.
-func DownloadLatestFirmware(board string, factory bool) (*ReleaseAsset, error) {
-	// Fetch latest release
-	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", githubAPIBase, repoOwner, repoName)
-	resp, err := http.Get(url)
+var boardAssetRe = regexp.MustCompile(`^taipanminer-(.+?)(?:-factory)?\.bin$`)
+
+// DownloadFirmware downloads firmware for a given board from GitHub releases.
+// If version is empty, the latest release is used.
+// If factory is true, downloads taipanminer-<board>-factory.bin; otherwise taipanminer-<board>.bin.
+// Returns a ReleaseAsset with the cached file path and resolved tag.
+func DownloadFirmware(board string, factory bool, version string) (*ReleaseAsset, error) {
+	// Resolve release metadata (possibly from cache)
+	release, err := fetchRelease(version)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest release: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github api returned status %d", resp.StatusCode)
-	}
-
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("failed to parse release: %w", err)
+		return nil, err
 	}
 
 	if len(release.Assets) == 0 {
@@ -73,12 +64,14 @@ func DownloadLatestFirmware(board string, factory bool) (*ReleaseAsset, error) {
 		otherName = fmt.Sprintf("taipanminer-%s-factory.bin", board)
 	}
 
-	// Find exact match for expected asset
+	// Find exact match for expected asset; collect available boards
 	var matchedAsset *githubAsset
 	var otherTypeExists bool
-	var available []string
+	boardSet := map[string]struct{}{}
 	for i := range release.Assets {
-		available = append(available, release.Assets[i].Name)
+		if m := boardAssetRe.FindStringSubmatch(release.Assets[i].Name); m != nil {
+			boardSet[m[1]] = struct{}{}
+		}
 		if release.Assets[i].Name == expectedName {
 			matchedAsset = &release.Assets[i]
 		}
@@ -88,8 +81,13 @@ func DownloadLatestFirmware(board string, factory bool) (*ReleaseAsset, error) {
 	}
 
 	if matchedAsset == nil {
-		// Build helpful error message
-		errMsg := fmt.Sprintf("no asset %q found; available assets: %v", expectedName, available)
+		boards := make([]string, 0, len(boardSet))
+		for b := range boardSet {
+			boards = append(boards, b)
+		}
+		sort.Strings(boards)
+		errMsg := fmt.Sprintf("board %q not available in release %s; available boards: %s",
+			board, release.TagName, strings.Join(boards, ", "))
 		if otherTypeExists {
 			if factory {
 				errMsg += " — the OTA image exists, pass --ota to use it"
@@ -100,49 +98,68 @@ func DownloadLatestFirmware(board string, factory bool) (*ReleaseAsset, error) {
 		return nil, fmt.Errorf("%s", errMsg)
 	}
 
-	// Create temp directory and download asset
-	tmpDir, err := os.MkdirTemp("", "taipan-firmware-")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	// Parse sha256 from digest field (format: "sha256:<hex>")
+	sha256 := ""
+	if d := matchedAsset.Digest; strings.HasPrefix(d, "sha256:") {
+		sha256 = strings.TrimPrefix(d, "sha256:")
 	}
 
-	localPath := filepath.Join(tmpDir, matchedAsset.Name)
-	if err := downloadFile(localPath, matchedAsset.BrowserDownloadURL); err != nil {
-		return nil, fmt.Errorf("failed to download asset: %w", err)
+	// Get-or-download via cache
+	path, err := getCachedFirmware(release.TagName, matchedAsset.Name, matchedAsset.BrowserDownloadURL, sha256)
+	if err != nil {
+		return nil, err
 	}
 
 	return &ReleaseAsset{
 		Name:    matchedAsset.Name,
 		Version: release.TagName,
-		Path:    localPath,
+		Path:    path,
+		SHA256:  sha256,
 	}, nil
 }
 
-// downloadFile downloads a file from the given URL and saves it to the given path
-func downloadFile(filepath string, url string) error {
-	resp, err := http.Get(url)
+// fetchRelease fetches release metadata from GitHub, using cache when possible.
+func fetchRelease(version string) (*githubRelease, error) {
+	var apiURL string
+	cacheKey := version
+	if version == "" {
+		apiURL = fmt.Sprintf("%s/repos/%s/%s/releases/latest", githubAPIBase, repoOwner, repoName)
+		cacheKey = "latest"
+	} else {
+		apiURL = fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", githubAPIBase, repoOwner, repoName, version)
+	}
+
+	// Try metadata cache
+	if data, ok := loadReleaseMeta(cacheKey); ok {
+		var release githubRelease
+		if err := json.Unmarshal(data, &release); err == nil {
+			return &release, nil
+		}
+	}
+
+	// Fetch from GitHub
+	resp, err := http.Get(apiURL) //nolint:noctx
 	if err != nil {
-		return fmt.Errorf("download request failed: %w", err)
+		return nil, fmt.Errorf("failed to fetch release: %w", err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("github api returned status %d", resp.StatusCode)
 	}
 
-	file, err := os.Create(filepath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+	// Decode
+	var release githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("failed to parse release: %w", err)
 	}
 
-	return nil
+	// Cache encoded form
+	if data, err := json.Marshal(&release); err == nil {
+		_ = storeReleaseMeta(cacheKey, data)
+	}
+
+	return &release, nil
 }
