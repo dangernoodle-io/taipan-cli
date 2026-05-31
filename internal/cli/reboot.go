@@ -5,14 +5,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dangernoodle-io/taipan-cli/internal/device"
-	"github.com/dangernoodle-io/taipan-cli/internal/discover"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
 )
 
@@ -42,26 +39,12 @@ func runReboot(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("must specify --all or at least one --host")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(rebootTimeout)*time.Second)
-	defer cancel()
-
-	devices, err := discover.Browse(ctx)
+	targetDevices, err := resolveTargets(rebootHosts, rebootAll, rebootTimeout)
 	if err != nil {
 		return err
 	}
-
-	sort.Slice(devices, func(i, j int) bool {
-		return devices[i].Hostname < devices[j].Hostname
-	})
-
-	var targetDevices []discover.DeviceInfo
-	if rebootAll {
-		targetDevices = devices
-	} else {
-		targetDevices = filterDevices(devices, rebootHosts)
-		if len(targetDevices) == 0 {
-			return fmt.Errorf("no matching devices found")
-		}
+	if !rebootAll && len(targetDevices) == 0 {
+		return fmt.Errorf("no matching devices found")
 	}
 
 	// Confirm unless --force

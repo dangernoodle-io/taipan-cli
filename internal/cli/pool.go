@@ -4,13 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dangernoodle-io/taipan-cli/internal/device"
-	"github.com/dangernoodle-io/taipan-cli/internal/discover"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
 )
 
@@ -40,26 +37,12 @@ func runPool(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("must specify --all or at least one --host")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(poolTimeout)*time.Second)
-	defer cancel()
-
-	devices, err := discover.Browse(ctx)
+	targetDevices, err := resolveTargets(poolHosts, poolAll, poolTimeout)
 	if err != nil {
 		return err
 	}
-
-	sort.Slice(devices, func(i, j int) bool {
-		return devices[i].Hostname < devices[j].Hostname
-	})
-
-	var targetDevices []discover.DeviceInfo
-	if poolAll {
-		targetDevices = devices
-	} else {
-		targetDevices = filterDevices(devices, poolHosts)
-		if len(targetDevices) == 0 {
-			return fmt.Errorf("no matching devices found")
-		}
+	if !poolAll && len(targetDevices) == 0 {
+		return fmt.Errorf("no matching devices found")
 	}
 
 	var errs []error

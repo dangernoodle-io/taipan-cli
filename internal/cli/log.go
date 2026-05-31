@@ -7,10 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/dangernoodle-io/taipan-cli/internal/discover"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
@@ -47,33 +45,15 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("must specify --all or at least one --host")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(logTimeout)*time.Second)
-	defer cancel()
-
-	devices, err := discover.Browse(ctx)
+	targetDevices, err := resolveTargets(logHosts, logAll, logTimeout)
 	if err != nil {
 		return err
 	}
-
-	if len(devices) == 0 {
+	if len(targetDevices) == 0 {
 		return fmt.Errorf("no devices found")
 	}
 
-	sort.Slice(devices, func(i, j int) bool {
-		return devices[i].Hostname < devices[j].Hostname
-	})
-
-	var targetDevices []discover.DeviceInfo
-	if logAll {
-		targetDevices = devices
-	} else {
-		targetDevices = filterDevices(devices, logHosts)
-		if len(targetDevices) == 0 {
-			return fmt.Errorf("no matching devices found")
-		}
-	}
-
-	ctx, cancel = signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	multi := len(targetDevices) > 1
