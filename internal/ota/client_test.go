@@ -34,14 +34,13 @@ func parseTestServerURL(serverURL string) (string, int, error) {
 	return host, port, nil
 }
 
-// updateStatusBody builds a JSON body for /api/update/status test responses.
-func updateStatusBody(current, latest string, available bool, lastCheckOK bool, ts int64) string {
-	return fmt.Sprintf(`{"current":%q,"latest":%q,"available":%v,"last_check_ok":%v,"last_check_ts":%d,"download_url":""}`,
-		current, latest, available, lastCheckOK, ts)
+// statusBody builds a JSON body for /api/update/status with outcome enum.
+func statusBody(current, latest string, available bool, ts int64, outcome, downloadURL string) string {
+	return fmt.Sprintf(`{"current":%q,"latest":%q,"available":%v,"last_check_ts":%d,"download_url":%q,"outcome":%q}`,
+		current, latest, available, ts, downloadURL, outcome)
 }
 
-// TestCheck_Available tests Check with an available update.
-// New flow: GET /api/update/status (pre-kick) → POST /api/update/check → GET /api/update/status (poll).
+// TestCheck_Available tests Check with outcome="available".
 func TestCheck_Available(t *testing.T) {
 	var reqCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,14 +50,14 @@ func TestCheck_Available(t *testing.T) {
 		case 1: // pre-kick GET /api/update/status
 			require.Equal(t, http.MethodGet, r.Method)
 			require.Equal(t, "/api/update/status", r.URL.Path)
-			_, _ = w.Write([]byte(updateStatusBody("v1.0.0", "v1.1.0", true, true, 100)))
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 100, "unknown", "")))
 		case 2: // POST /api/update/check
 			require.Equal(t, http.MethodPost, r.Method)
 			require.Equal(t, "/api/update/check", r.URL.Path)
 			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // poll GET /api/update/status — ts advanced
+		default: // poll — ts advanced, outcome terminal
 			require.Equal(t, "/api/update/status", r.URL.Path)
-			_, _ = w.Write([]byte(updateStatusBody("v1.0.0", "v1.1.0", true, true, 200)))
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 200, "available", "https://example.com/fw.bin")))
 		}
 	}))
 	defer server.Close()
@@ -73,21 +72,23 @@ func TestCheck_Available(t *testing.T) {
 	assert.Equal(t, "v1.0.0", result.CurrentVersion)
 	assert.Equal(t, "v1.1.0", result.LatestVersion)
 	assert.True(t, result.UpdateAvailable)
+	assert.Equal(t, "available", result.Outcome)
+	assert.Equal(t, "https://example.com/fw.bin", result.DownloadURL)
 }
 
-// TestCheck_NotAvailable tests Check with no update available.
-func TestCheck_NotAvailable(t *testing.T) {
+// TestCheck_UpToDate tests Check with outcome="up_to_date".
+func TestCheck_UpToDate(t *testing.T) {
 	var reqCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := reqCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		switch n {
-		case 1: // pre-kick status
-			_, _ = w.Write([]byte(updateStatusBody("v1.1.0", "v1.1.0", false, true, 100)))
+		case 1: // pre-kick
+			_, _ = w.Write([]byte(statusBody("v1.1.0", "v1.1.0", false, 100, "unknown", "")))
 		case 2: // kick
 			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // poll — ts advanced
-			_, _ = w.Write([]byte(updateStatusBody("v1.1.0", "v1.1.0", false, true, 200)))
+		default: // poll — ts advanced, outcome up_to_date
+			_, _ = w.Write([]byte(statusBody("v1.1.0", "v1.1.0", false, 200, "up_to_date", "")))
 		}
 	}))
 	defer server.Close()
@@ -100,8 +101,145 @@ func TestCheck_NotAvailable(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "v1.1.0", result.CurrentVersion)
-	assert.Equal(t, "v1.1.0", result.LatestVersion)
 	assert.False(t, result.UpdateAvailable)
+	assert.Equal(t, "up_to_date", result.Outcome)
+}
+
+// TestCheck_NoAsset tests that outcome="no_asset" returns quickly without hanging.
+func TestCheck_NoAsset(t *testing.T) {
+	var reqCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch n {
+		case 1: // pre-kick
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 100, "unknown", "")))
+		case 2: // kick
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		default: // poll — ts advanced, outcome no_asset
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 200, "no_asset", "")))
+		}
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+
+	start := time.Now()
+	result, err := client.Check(context.Background())
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Equal(t, "no_asset", result.Outcome)
+	// Must return quickly — not hang on the 2s poll interval more than once.
+	assert.Less(t, elapsed, 5*time.Second)
+}
+
+// TestCheck_CheckFailed tests that outcome="check_failed" is returned without looping.
+func TestCheck_CheckFailed(t *testing.T) {
+	var reqCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch n {
+		case 1: // pre-kick
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 100, "unknown", "")))
+		case 2: // kick
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		default: // poll — ts advanced, outcome check_failed
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 200, "check_failed", "")))
+		}
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, err := client.Check(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "check_failed", result.Outcome)
+}
+
+// TestCheck_PendingThenTerminal tests that outcome="unknown" keeps polling until terminal.
+func TestCheck_PendingThenTerminal(t *testing.T) {
+	var reqCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch n {
+		case 1: // pre-kick — ts=100
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 100, "unknown", "")))
+		case 2: // kick
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		case 3: // first poll — ts unchanged, still unknown
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 100, "unknown", "")))
+		default: // second poll — ts advanced, terminal outcome
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 200, "available", "https://example.com/fw.bin")))
+		}
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, err := client.Check(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "available", result.Outcome)
+	assert.GreaterOrEqual(t, reqCount.Load(), int32(4))
+}
+
+// TestCheck_503NotInitialized tests that 503 returns "not initialized" error.
+func TestCheck_503NotInitialized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"not initialized"}`))
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, err := client.Check(context.Background())
+
+	assert.Nil(t, result)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not initialized")
+}
+
+// TestCheck_BackstopDeadline tests that a context deadline fires instead of hanging
+// when the server always returns outcome="unknown".
+func TestCheck_BackstopDeadline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPost: // kick
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		default: // always return ts=100, outcome=unknown
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 100, "unknown", "")))
+		}
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	result, err := client.Check(ctx)
+
+	assert.Nil(t, result)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 // TestCheck_HTTPError tests Check when the pre-kick status call fails.
@@ -141,37 +279,6 @@ func TestCheck_BadJSON(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "decode response")
-}
-
-// TestCheck_PollsUntilTsAdvances tests that Check keeps polling until last_check_ts advances.
-func TestCheck_PollsUntilTsAdvances(t *testing.T) {
-	var reqCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reqCount.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		switch n {
-		case 1: // pre-kick — ts=100
-			_, _ = w.Write([]byte(updateStatusBody("v1.0.0", "v1.1.0", true, true, 100)))
-		case 2: // kick
-			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		case 3: // first poll — ts still 100 (not yet advanced)
-			_, _ = w.Write([]byte(updateStatusBody("v1.0.0", "v1.1.0", true, true, 100)))
-		default: // second poll — ts advanced to 200
-			_, _ = w.Write([]byte(updateStatusBody("v1.0.0", "v1.1.0", true, true, 200)))
-		}
-	}))
-	defer server.Close()
-
-	host, port, err := parseTestServerURL(server.URL)
-	require.NoError(t, err)
-
-	// Override the 2s wait so the test finishes fast.
-	client := NewClient(host, port)
-	result, err := client.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.True(t, result.UpdateAvailable)
-	assert.GreaterOrEqual(t, reqCount.Load(), int32(4))
 }
 
 // TestTrigger_Started tests Trigger with a successful update start (202).
@@ -432,7 +539,7 @@ func TestPollStatus_ContextCancellation(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestFetchVersion_Success tests FetchVersion happy path — now reads /api/info JSON.
+// TestFetchVersion_Success tests FetchVersion happy path — reads /api/info JSON.
 func TestFetchVersion_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/info", r.URL.Path)
@@ -467,7 +574,6 @@ func TestFetchVersion_Non200(t *testing.T) {
 }
 
 // TestWaitForBoot_ReadyImmediately returns without waiting a full interval.
-// New flow: GET /api/health (liveness) then GET /api/info (version).
 func TestWaitForBoot_ReadyImmediately(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

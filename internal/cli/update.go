@@ -114,8 +114,10 @@ func updateDevice(device discover.DeviceInfo) error {
 	hostname := device.Hostname
 	client := ota.NewClient(device.IP, device.Port)
 
-	// Check for available updates
-	checkResult, err := client.Check(context.Background())
+	// Check for available updates (30s backstop to prevent infinite hang)
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer checkCancel()
+	checkResult, err := client.Check(checkCtx)
 	if err != nil {
 		return fmt.Errorf("[%s] check failed: %w", hostname, err)
 	}
@@ -125,16 +127,27 @@ func updateDevice(device discover.DeviceInfo) error {
 
 	output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
 
-	// If no update available, return success
-	if !checkResult.UpdateAvailable {
+	switch checkResult.Outcome {
+	case "available":
+		// proceed to trigger below
+	case "up_to_date":
 		output.Success("[%s] already up to date (%s)", hostname, currentVersion)
 		return nil
+	case "no_asset":
+		output.Warn("[%s] no firmware published for this board", hostname)
+		return nil
+	case "check_failed":
+		return fmt.Errorf("[%s] update check failed (device could not complete the release check)", hostname)
+	default:
+		return fmt.Errorf("[%s] unexpected update check outcome %q", hostname, checkResult.Outcome)
 	}
 
 	output.Info("[%s] updating %s → %s", hostname, currentVersion, latestVersion)
 
-	// Trigger the update
-	triggerResult, statusCode, err := client.Trigger(context.Background())
+	// Trigger the update (30s backstop)
+	triggerCtx, triggerCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer triggerCancel()
+	triggerResult, statusCode, err := client.Trigger(triggerCtx)
 	if err != nil {
 		return fmt.Errorf("[%s] trigger failed: %w", hostname, err)
 	}
