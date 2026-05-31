@@ -32,7 +32,7 @@ taipan
     --all                    # update all discovered devices
     --timeout, -t            # discovery timeout in seconds (default 5)
   stats [flags]              # show mining statistics from devices
-    --host HOSTNAME          # target specific device(s) (repeatable)
+    --host HOSTNAME          # target specific device(s) (repeatable); accepts host or host:port (default port 80); skips mDNS when --all is not set
     --all                    # query all discovered devices
     --timeout, -t            # discovery timeout in seconds (default 5)
     --json                   # output as JSON

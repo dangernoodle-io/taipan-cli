@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sort"
 	"strings"
 	"time"
 
@@ -40,28 +39,12 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("must specify --all or at least one --host")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(updateTimeout)*time.Second)
-	defer cancel()
-
-	devices, err := discover.Browse(ctx)
+	targetDevices, err := resolveTargets(updateHosts, updateAll, updateTimeout)
 	if err != nil {
 		return err
 	}
-
-	// Sort devices alphabetically by hostname
-	sort.Slice(devices, func(i, j int) bool {
-		return devices[i].Hostname < devices[j].Hostname
-	})
-
-	// Filter by --host if specified
-	var targetDevices []discover.DeviceInfo
-	if updateAll {
-		targetDevices = devices
-	} else {
-		targetDevices = filterDevices(devices, updateHosts)
-		if len(targetDevices) == 0 {
-			return fmt.Errorf("no matching devices found")
-		}
+	if !updateAll && len(targetDevices) == 0 {
+		return fmt.Errorf("no matching devices found")
 	}
 
 	// Update each device serially. Surface every per-device failure inline so
