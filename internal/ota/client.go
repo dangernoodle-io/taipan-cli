@@ -18,7 +18,8 @@ type CheckResult struct {
 	CurrentVersion  string `json:"current_version"`
 	LatestVersion   string `json:"latest_version"`
 	UpdateAvailable bool   `json:"update_available"`
-	Asset           string `json:"asset"`
+	Outcome         string `json:"outcome"`
+	DownloadURL     string `json:"download_url"`
 }
 
 type TriggerResult struct {
@@ -47,16 +48,16 @@ func NewClient(ip string, port int) *Client {
 }
 
 // Check kicks the device's update-check worker and polls /api/update/status
-// until last_check_ts advances. Returns a CheckResult on success.
+// until last_check_ts advances and the outcome is terminal. Returns a CheckResult on success.
 func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
 	// Snapshot current ts before kick so we can detect advancement.
 	type statusResp struct {
 		Current     string `json:"current"`
 		Latest      string `json:"latest"`
 		Available   bool   `json:"available"`
-		LastCheckOK bool   `json:"last_check_ok"`
 		LastCheckTs int64  `json:"last_check_ts"`
 		DownloadURL string `json:"download_url"`
+		Outcome     string `json:"outcome"`
 	}
 	fetchStatus := func() (*statusResp, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/update/status", nil)
@@ -69,6 +70,9 @@ func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return nil, fmt.Errorf("device update check not initialized")
+		}
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, body)
 		}
@@ -100,18 +104,19 @@ func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
 		return nil, fmt.Errorf("kick failed: %d", kickResp.StatusCode)
 	}
 
-	// Poll /api/update/status until last_check_ts advances.
+	// Poll /api/update/status until ts advances and outcome is terminal (not "unknown").
 	for {
 		s, err := fetchStatus()
 		if err != nil {
 			return nil, err
 		}
-		if s.LastCheckOK && s.LastCheckTs > beforeTs {
+		if s.LastCheckTs > beforeTs && s.Outcome != "unknown" {
 			return &CheckResult{
 				CurrentVersion:  s.Current,
 				LatestVersion:   s.Latest,
 				UpdateAvailable: s.Available,
-				Asset:           "",
+				Outcome:         s.Outcome,
+				DownloadURL:     s.DownloadURL,
 			}, nil
 		}
 		select {
