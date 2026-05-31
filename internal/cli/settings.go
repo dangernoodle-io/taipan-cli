@@ -125,7 +125,7 @@ func runSettingsSet(cmd *cobra.Command, args []string) error {
 	// Type coercion based on key
 	var value any
 	switch key {
-	case "display_en", "ota_skip_check":
+	case "display_en", "ota_skip_check", "mdns_en", "knot_en":
 		v, err := strconv.ParseBool(valueStr)
 		if err != nil {
 			return fmt.Errorf("invalid boolean value for %s: %w", key, err)
@@ -156,17 +156,10 @@ func runSettingsSet(cmd *cobra.Command, args []string) error {
 }
 
 func printSettings(s *device.SettingsResponse) {
-	fmt.Printf("  %-16s %s\n", "Pool Host:", s.PoolHost)
-	fmt.Printf("  %-16s %d\n", "Pool Port:", s.PoolPort)
-	fmt.Printf("  %-16s %s\n", "Wallet:", s.Wallet)
-	fmt.Printf("  %-16s %s\n", "Worker:", s.Worker)
-
-	if s.PoolPass == "" {
-		fmt.Printf("  %-16s %s\n", "Pool Pass:", "(not set)")
-	} else {
-		fmt.Printf("  %-16s %s\n", "Pool Pass:", "****")
-	}
-
+	fmt.Printf("  %-16s %s\n", "Hostname:", s.Hostname)
 	fmt.Printf("  %-16s %v\n", "Display:", s.DisplayEn)
 	fmt.Printf("  %-16s %v\n", "OTA Skip Check:", s.OTASkipCheck)
+	fmt.Printf("  %-16s %v\n", "mDNS:", s.MDNSEn)
+	fmt.Printf("  %-16s %v\n", "Knot:", s.KnotEn)
+	fmt.Printf("  %-16s %v\n", "Provisioned:", s.Provisioned)
 }
