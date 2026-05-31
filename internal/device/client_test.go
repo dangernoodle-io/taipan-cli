@@ -45,22 +45,11 @@ func TestStats_OK(t *testing.T) {
 			HashrateAvg:     1.4e9,
 			TempC:           45.5,
 			Shares:          100,
-			PoolDifficulty:  0.0625,
 			SessionShares:   50,
 			SessionRejected: 2,
 			LastShareAgoS:   30,
-			LifetimeShares:  10000,
 			BestDiff:        2.5,
-			PoolHost:        "pool.example.com",
-			PoolPort:        3333,
-			Worker:          "test-worker",
-			Wallet:          "test-wallet-addr",
 			UptimeS:         3600,
-			Version:         "v1.2.3",
-			BuildDate:       "2026-04-09",
-			BuildTime:       "12:34:56",
-			Board:           "tdongle-s3",
-			DisplayEn:       true,
 		}
 		_ = json.NewEncoder(w).Encode(result)
 	}))
@@ -77,20 +66,11 @@ func TestStats_OK(t *testing.T) {
 	assert.Equal(t, 1.4e9, stats.HashrateAvg)
 	assert.Equal(t, 45.5, stats.TempC)
 	assert.Equal(t, uint32(100), stats.Shares)
-	assert.Equal(t, 0.0625, stats.PoolDifficulty)
 	assert.Equal(t, uint32(50), stats.SessionShares)
 	assert.Equal(t, uint32(2), stats.SessionRejected)
 	assert.Equal(t, int64(30), stats.LastShareAgoS)
-	assert.Equal(t, float64(10000), stats.LifetimeShares)
 	assert.Equal(t, 2.5, stats.BestDiff)
-	assert.Equal(t, "pool.example.com", stats.PoolHost)
-	assert.Equal(t, 3333, stats.PoolPort)
-	assert.Equal(t, "test-worker", stats.Worker)
-	assert.Equal(t, "test-wallet-addr", stats.Wallet)
 	assert.Equal(t, 3600.0, stats.UptimeS)
-	assert.Equal(t, "v1.2.3", stats.Version)
-	assert.Equal(t, "tdongle-s3", stats.Board)
-	assert.True(t, stats.DisplayEn)
 	assert.Nil(t, stats.AsicHashrate)
 }
 
@@ -112,22 +92,11 @@ func TestStats_ASICBoard(t *testing.T) {
 			HashrateAvg:     4.9e9,
 			TempC:           45.5,
 			Shares:          100,
-			PoolDifficulty:  0.0625,
 			SessionShares:   50,
 			SessionRejected: 2,
 			LastShareAgoS:   30,
-			LifetimeShares:  10000,
 			BestDiff:        2.5,
-			PoolHost:        "pool.example.com",
-			PoolPort:        3333,
-			Worker:          "test-worker",
-			Wallet:          "test-wallet-addr",
 			UptimeS:         3600,
-			Version:         "v1.2.3",
-			BuildDate:       "2026-04-09",
-			BuildTime:       "12:34:56",
-			Board:           "tdongle-asic",
-			DisplayEn:       true,
 			AsicHashrate:    &asicHashrate,
 			AsicHashrateAvg: &asicHashrateAvg,
 			AsicTempC:       &asicTempC,
