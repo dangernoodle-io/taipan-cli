@@ -40,13 +40,12 @@ type InfoResponse struct {
 
 // SettingsResponse represents the JSON response from GET /api/settings.
 type SettingsResponse struct {
-	PoolHost     string `json:"pool_host"`
-	PoolPort     int    `json:"pool_port"`
-	Wallet       string `json:"wallet"`
-	Worker       string `json:"worker"`
-	PoolPass     string `json:"pool_pass"`
+	Hostname     string `json:"hostname"`
 	DisplayEn    bool   `json:"display_en"`
 	OTASkipCheck bool   `json:"ota_skip_check"`
+	MDNSEn       bool   `json:"mdns_en"`
+	KnotEn       bool   `json:"knot_en"`
+	Provisioned  bool   `json:"provisioned"`
 }
 
 // SetSettingResponse represents the JSON response from PATCH /api/settings.

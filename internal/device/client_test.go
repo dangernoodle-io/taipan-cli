@@ -241,13 +241,12 @@ func TestGetSettings_OK(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		result := SettingsResponse{
-			PoolHost:     "pool.example.com",
-			PoolPort:     3333,
-			Wallet:       "wallet-addr",
-			Worker:       "test-worker",
-			PoolPass:     "password123",
+			Hostname:     "taipan-device",
 			DisplayEn:    true,
 			OTASkipCheck: false,
+			MDNSEn:       true,
+			KnotEn:       true,
+			Provisioned:  true,
 		}
 		_ = json.NewEncoder(w).Encode(result)
 	}))
@@ -260,13 +259,12 @@ func TestGetSettings_OK(t *testing.T) {
 	settings, err := client.GetSettings(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, "pool.example.com", settings.PoolHost)
-	assert.Equal(t, 3333, settings.PoolPort)
-	assert.Equal(t, "wallet-addr", settings.Wallet)
-	assert.Equal(t, "test-worker", settings.Worker)
-	assert.Equal(t, "password123", settings.PoolPass)
+	assert.Equal(t, "taipan-device", settings.Hostname)
 	assert.True(t, settings.DisplayEn)
 	assert.False(t, settings.OTASkipCheck)
+	assert.True(t, settings.MDNSEn)
+	assert.True(t, settings.KnotEn)
+	assert.True(t, settings.Provisioned)
 }
 
 // TestGetSettings_HTTPError tests GetSettings with a server error response.
