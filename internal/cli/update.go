@@ -12,6 +12,7 @@ import (
 	"github.com/dangernoodle-io/taipan-cli/internal/discover"
 	"github.com/dangernoodle-io/taipan-cli/internal/ota"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
+	"github.com/dangernoodle-io/taipan-cli/internal/ui"
 )
 
 var (
@@ -100,7 +101,9 @@ func updateDevice(device discover.DeviceInfo) error {
 	// Check for available updates (30s backstop to prevent infinite hang)
 	checkCtx, checkCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer checkCancel()
+	stopCheck := ui.Single("checking " + hostname)
 	checkResult, err := client.Check(checkCtx)
+	stopCheck()
 	if err != nil {
 		return fmt.Errorf("[%s] check failed: %w", hostname, err)
 	}

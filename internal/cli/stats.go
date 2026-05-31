@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dangernoodle-io/taipan-cli/internal/device"
+	"github.com/dangernoodle-io/taipan-cli/internal/discover"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
+	"github.com/dangernoodle-io/taipan-cli/internal/ui"
 )
 
 var (
@@ -33,9 +36,18 @@ func init() {
 	rootCmd.AddCommand(statsCmd)
 }
 
+type statsResult struct {
+	stats *device.StatsResponse
+	err   error
+}
+
 func runStats(cmd *cobra.Command, args []string) error {
 	if !statsAll && len(statsHosts) == 0 {
 		return fmt.Errorf("must specify --all or at least one --host")
+	}
+
+	if statsJSON {
+		ui.SetEnabled(false)
 	}
 
 	targetDevices, err := resolveTargets(statsHosts, statsAll, statsTimeout)
@@ -46,19 +58,46 @@ func runStats(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no matching devices found")
 	}
 
-	var errs []error
+	results := make([]statsResult, len(targetDevices))
+	g := ui.NewGroup()
+	lines := make([]*ui.Line, len(targetDevices))
 	for i, d := range targetDevices {
-		client := device.NewClient(d.IP, d.Port)
-		stats, err := client.Stats(context.Background())
-		if err != nil {
-			errs = append(errs, fmt.Errorf("[%s] %w", d.Hostname, err))
+		lines[i] = g.Add("querying " + d.Hostname)
+	}
+	g.Start()
+
+	var wg sync.WaitGroup
+	for i, d := range targetDevices {
+		wg.Add(1)
+		go func(idx int, dev discover.DeviceInfo) {
+			defer wg.Done()
+			client := device.NewClient(dev.IP, dev.Port)
+			s, err := client.Stats(context.Background())
+			if err != nil {
+				results[idx] = statsResult{err: err}
+				lines[idx].Error(dev.Hostname + ": " + err.Error())
+			} else {
+				results[idx] = statsResult{stats: s}
+				lines[idx].Complete(dev.Hostname)
+			}
+		}(i, d)
+	}
+	wg.Wait()
+	g.Stop()
+
+	var errCount int
+	for i, d := range targetDevices {
+		r := results[i]
+		if r.err != nil {
+			output.Error("[%s] %v", d.Hostname, r.err)
+			errCount++
 			continue
 		}
-
 		if statsJSON {
-			data, err := json.MarshalIndent(stats, "", "  ")
+			data, err := json.MarshalIndent(r.stats, "", "  ")
 			if err != nil {
-				errs = append(errs, fmt.Errorf("[%s] %w", d.Hostname, err))
+				output.Error("[%s] %v", d.Hostname, err)
+				errCount++
 				continue
 			}
 			if len(targetDevices) > 1 {
@@ -72,12 +111,12 @@ func runStats(cmd *cobra.Command, args []string) error {
 				}
 				output.Info("[%s]", d.Hostname)
 			}
-			printStats(stats)
+			printStats(r.stats)
 		}
 	}
 
-	if len(errs) > 0 {
-		return errs[0]
+	if errCount > 0 {
+		return fmt.Errorf("%d of %d device(s) failed", errCount, len(targetDevices))
 	}
 	return nil
 }

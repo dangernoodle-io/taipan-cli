@@ -10,6 +10,7 @@ import (
 
 	"github.com/dangernoodle-io/taipan-cli/internal/device"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
+	"github.com/dangernoodle-io/taipan-cli/internal/ui"
 )
 
 var (
@@ -54,6 +55,10 @@ func runSettingsGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--host is required")
 	}
 
+	if settingsJSON {
+		ui.SetEnabled(false)
+	}
+
 	targetDevices, err := resolveTargets([]string{settingsHost}, false, settingsTimeout)
 	if err != nil {
 		return err
@@ -64,7 +69,9 @@ func runSettingsGet(cmd *cobra.Command, args []string) error {
 
 	d := targetDevices[0]
 	client := device.NewClient(d.IP, d.Port)
+	stop := ui.Single("querying " + d.Hostname)
 	settings, err := client.GetSettings(context.Background())
+	stop()
 	if err != nil {
 		return fmt.Errorf("[%s] %w", d.Hostname, err)
 	}
@@ -120,7 +127,9 @@ func runSettingsSet(cmd *cobra.Command, args []string) error {
 		value = valueStr
 	}
 
+	stop := ui.Single("querying " + d.Hostname)
 	response, err := client.SetSetting(context.Background(), key, value)
+	stop()
 	if err != nil {
 		return fmt.Errorf("[%s] %w", d.Hostname, err)
 	}
