@@ -429,6 +429,80 @@ func TestSetSetting_HTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "unexpected status 500")
 }
 
+// TestPool_OK tests Pool with the tdongle live payload shape.
+func TestPool_OK(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/pool", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		latency := 40
+		versionMask := "1fffe000"
+		sessionAgo := int64(48271)
+		result := PoolResponse{
+			Host:                  "hmpool.io",
+			Port:                  3337,
+			Worker:                "tdongleS3-3",
+			Wallet:                "bc1q-test-wallet",
+			Connected:             true,
+			SessionStartAgoS:      &sessionAgo,
+			CurrentDifficulty:     0.01,
+			PoolEffectiveHashrate: 311378,
+			LatencyMs:             &latency,
+			VersionMask:           &versionMask,
+			ActivePoolIdx:         0,
+			LifetimeBlocksTotal:   0,
+			Stats: []PoolStat{
+				{
+					Host:        "hmpool.io",
+					Port:        3337,
+					Shares:      1952,
+					BestDiff:    27.9872,
+					BlocksFound: 0,
+					LastSeenS:   4,
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	pool, err := client.Pool(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "hmpool.io", pool.Host)
+	assert.Equal(t, 3337, pool.Port)
+	assert.Equal(t, "tdongleS3-3", pool.Worker)
+	assert.Equal(t, 0.01, pool.CurrentDifficulty)
+	assert.Equal(t, 0, pool.LifetimeBlocksTotal)
+	require.Len(t, pool.Stats, 1)
+	assert.Equal(t, 27.9872, pool.Stats[0].BestDiff)
+}
+
+// TestPool_HTTPError tests Pool with a server error response.
+func TestPool_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal server error"))
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	pool, err := client.Pool(context.Background())
+
+	assert.Nil(t, pool)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected status 500")
+}
+
 // TestReboot_OK tests Reboot with a valid response.
 func TestReboot_OK(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -46,6 +46,11 @@ taipan
     set KEY VALUE [--host HOST] # set a setting on a device
     --timeout, -t            # discovery timeout in seconds (default 5)
     --json                   # output as JSON (get only)
+  pool [flags]               # show pool connection info from devices
+    --host HOSTNAME          # target specific device(s) (repeatable)
+    --all                    # query all discovered devices
+    --timeout, -t            # discovery timeout in seconds (default 5)
+    --json                   # output as JSON
   reboot [flags]             # reboot devices
     --host HOSTNAME          # target specific device(s) (repeatable)
     --all                    # reboot all discovered devices
@@ -83,7 +88,7 @@ Profile-based configuration at `~/.config/taipan/config.yml`. Profiles define Wi
 | `internal/cli/` | Cobra root + subcommand wiring |
 | `internal/config/` | Profile config types, YAML load/save, board resolution |
 | `internal/discover/` | mDNS browse + HTTP enrichment |
-| `internal/device/` | Device HTTP client (stats, info, settings, reboot) |
+| `internal/device/` | Device HTTP client (stats, info, settings, pool, reboot) |
 | `internal/flash/` | NVS binary gen, GitHub release download, serial flash orchestration |
 | `internal/ota/` | OTA update client (check, trigger, poll status) |
 | `internal/output/` | Colored terminal output |

@@ -70,3 +70,30 @@ type SetSettingResponse struct {
 type RebootResponse struct {
 	Status string `json:"status"`
 }
+
+// PoolStat represents a single pool entry in the stats array of PoolResponse.
+type PoolStat struct {
+	Host       string  `json:"host"`
+	Port       int     `json:"port"`
+	Shares     int64   `json:"shares"`
+	BestDiff   float64 `json:"best_diff"`
+	BlocksFound int    `json:"blocks_found"`
+	LastSeenS  int     `json:"last_seen_s"`
+}
+
+// PoolResponse represents the JSON response from GET /api/pool.
+type PoolResponse struct {
+	Host                  string     `json:"host"`
+	Port                  int        `json:"port"`
+	Worker                string     `json:"worker"`
+	Wallet                string     `json:"wallet"`
+	Connected             bool       `json:"connected"`
+	SessionStartAgoS      *int64     `json:"session_start_ago_s"`
+	CurrentDifficulty     float64    `json:"current_difficulty"`
+	PoolEffectiveHashrate float64    `json:"pool_effective_hashrate"`
+	LatencyMs             *int       `json:"latency_ms"`
+	VersionMask           *string    `json:"version_mask"`
+	ActivePoolIdx         int        `json:"active_pool_idx"`
+	LifetimeBlocksTotal   int        `json:"lifetime_blocks_total"`
+	Stats                 []PoolStat `json:"stats"`
+}
