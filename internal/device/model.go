@@ -6,22 +6,11 @@ type StatsResponse struct {
 	HashrateAvg     float64  `json:"hashrate_avg"`
 	TempC           float64  `json:"temp_c"`
 	Shares          uint32   `json:"shares"`
-	PoolDifficulty  float64  `json:"pool_difficulty"`
 	SessionShares   uint32   `json:"session_shares"`
 	SessionRejected uint32   `json:"session_rejected"`
 	LastShareAgoS   int64    `json:"last_share_ago_s"`
-	LifetimeShares  float64  `json:"lifetime_shares"`
 	BestDiff        float64  `json:"best_diff"`
-	PoolHost        string   `json:"pool_host"`
-	PoolPort        int      `json:"pool_port"`
-	Worker          string   `json:"worker"`
-	Wallet          string   `json:"wallet"`
 	UptimeS         float64  `json:"uptime_s"`
-	Version         string   `json:"version"`
-	BuildDate       string   `json:"build_date"`
-	BuildTime       string   `json:"build_time"`
-	Board           string   `json:"board"`
-	DisplayEn       bool     `json:"display_en"`
 	AsicHashrate    *float64 `json:"asic_hashrate,omitempty"`
 	AsicHashrateAvg *float64 `json:"asic_hashrate_avg,omitempty"`
 	AsicShares      *uint32  `json:"asic_shares,omitempty"`

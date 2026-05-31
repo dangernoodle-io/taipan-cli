@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 	"time"
 
@@ -105,21 +104,14 @@ func printStats(s *device.StatsResponse) {
 	fmt.Printf("  %-16s %.1f°C\n", "Temp:", s.TempC)
 	fmt.Printf("  %-16s %d accepted / %d rejected\n", "Shares:", s.SessionShares, s.SessionRejected)
 
-	if s.BestDiff > 0 && s.PoolDifficulty > 0 {
-		mult := math.Floor(s.BestDiff / s.PoolDifficulty)
-		fmt.Printf("  %-16s %s (%.0fx)\n", "Best Diff:", fmtDiff(s.BestDiff), mult)
-	} else if s.BestDiff > 0 {
+	if s.BestDiff > 0 {
 		fmt.Printf("  %-16s %s\n", "Best Diff:", fmtDiff(s.BestDiff))
 	} else {
 		fmt.Printf("  %-16s --\n", "Best Diff:")
 	}
 
-	fmt.Printf("  %-16s %s\n", "Pool Diff:", fmtPoolDiff(s.PoolDifficulty))
 	fmt.Printf("  %-16s %s\n", "Uptime:", fmtUptime(s.UptimeS))
-	fmt.Printf("  %-16s %s:%d\n", "Pool:", s.PoolHost, s.PoolPort)
-	fmt.Printf("  %-16s %s\n", "Worker:", s.Worker)
 	fmt.Printf("  %-16s %s\n", "Last Share:", fmtLastShare(s.LastShareAgoS))
-	fmt.Printf("  %-16s %.0f\n", "Lifetime:", s.LifetimeShares)
 
 	if s.AsicHashrate != nil {
 		fmt.Printf("  %-16s %s\n", "ASIC Hashrate:", fmtHashrate(*s.AsicHashrate))
@@ -163,13 +155,6 @@ func fmtDiff(d float64) string {
 	default:
 		return fmt.Sprintf("%.4f", d)
 	}
-}
-
-func fmtPoolDiff(d float64) string {
-	if d <= 0 {
-		return "--"
-	}
-	return fmt.Sprintf("%.4f", d)
 }
 
 func fmtUptime(seconds float64) string {
