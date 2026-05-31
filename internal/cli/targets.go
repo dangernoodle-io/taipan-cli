@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dangernoodle-io/taipan-cli/internal/discover"
+	"github.com/dangernoodle-io/taipan-cli/internal/ui"
 )
 
 // directDevice builds a DeviceInfo for an explicit --host value, bypassing mDNS.
@@ -36,7 +37,9 @@ func resolveTargets(hosts []string, all bool, timeout int) ([]discover.DeviceInf
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
+	stop := ui.Single("Discovering devices…")
 	devices, err := discover.Browse(ctx)
+	stop()
 	if err != nil {
 		return nil, err
 	}

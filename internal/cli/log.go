@@ -12,6 +12,7 @@ import (
 
 	"github.com/dangernoodle-io/taipan-cli/internal/discover"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
+	"github.com/dangernoodle-io/taipan-cli/internal/ui"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -74,7 +75,8 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 		go func(d discover.DeviceInfo, pf func(string) string) {
 			defer wg.Done()
-			if err := streamDevice(ctx, d, pf, &mu); err != nil && ctx.Err() == nil {
+			stopConn := ui.Single("connecting to " + d.Hostname)
+			if err := streamDevice(ctx, d, pf, &mu, stopConn); err != nil && ctx.Err() == nil {
 				output.Error("[%s] %v", d.Hostname, err)
 			}
 		}(device, prefixFn)
@@ -84,17 +86,19 @@ func runLog(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func(string) string, mu *sync.Mutex) error {
+func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func(string) string, mu *sync.Mutex, stopConn func()) error {
 	url := fmt.Sprintf("http://%s:%d/api/logs", device.IP, device.Port)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
+		stopConn()
 		return err
 	}
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
+		stopConn()
 		return err
 	}
 	defer func() {
@@ -102,9 +106,11 @@ func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func
 	}()
 
 	if resp.StatusCode != http.StatusOK {
+		stopConn()
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
+	connStopped := false
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -120,6 +126,12 @@ func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func
 		}
 		payload := strings.TrimPrefix(line, "data: ")
 
+		// Stop the connection spinner before printing the first line
+		if !connStopped {
+			stopConn()
+			connStopped = true
+		}
+
 		if prefixFn != nil {
 			mu.Lock()
 			fmt.Println(prefixFn(device.Hostname) + payload)
@@ -127,6 +139,10 @@ func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func
 		} else {
 			fmt.Println(payload)
 		}
+	}
+
+	if !connStopped {
+		stopConn()
 	}
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {

@@ -92,6 +92,7 @@ Profile-based configuration at `~/.config/taipan/config.yml`. Profiles define Wi
 | `internal/flash/` | NVS binary gen, GitHub release download, serial flash orchestration |
 | `internal/ota/` | OTA update client (check, trigger, poll status) |
 | `internal/output/` | Colored terminal output |
+| `internal/ui/` | Activity spinners (ysmrr); auto-off on non-TTY, `--json`, `--no-color`/`NO_COLOR` |
 
 ## Dependencies
 

@@ -58,7 +58,7 @@ func TestStreamDevice_SingleDevice(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu)
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -82,7 +82,7 @@ func TestStreamDevice_SkipsCommentsAndEmptyLines(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu)
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -110,7 +110,7 @@ func TestStreamDevice_MultiDevice(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, prefixFn, &mu)
+		err := streamDevice(context.Background(), device, prefixFn, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -135,7 +135,7 @@ func TestStreamDevice_HTTPError(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	err := streamDevice(context.Background(), device, nil, &mu)
+	err := streamDevice(context.Background(), device, nil, &mu, func() {})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected status: 503")
 }
@@ -162,7 +162,7 @@ func TestStreamDevice_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	var mu sync.Mutex
-	err := streamDevice(ctx, device, nil, &mu)
+	err := streamDevice(ctx, device, nil, &mu, func() {})
 	// Should fail due to context being already cancelled
 	require.Error(t, err)
 }
@@ -185,7 +185,7 @@ func TestStreamDevice_MutexSerialization(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, prefixFn, &mu)
+		err := streamDevice(context.Background(), device, prefixFn, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -209,7 +209,7 @@ func TestStreamDevice_EmptyResponse(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu)
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -230,7 +230,7 @@ func TestStreamDevice_MixedFormatLines(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu)
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -255,7 +255,7 @@ func TestStreamDevice_DataLineWithoutPrefix(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu)
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -280,7 +280,7 @@ func TestStreamDevice_LongPayload(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu)
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
@@ -302,7 +302,7 @@ func TestStreamDevice_SpecialCharactersInPayload(t *testing.T) {
 
 	var mu sync.Mutex
 	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu)
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
+	"github.com/dangernoodle-io/taipan-cli/internal/ui"
 )
 
 // Version is set via ldflags at build time.
@@ -29,6 +30,7 @@ func init() {
 		if noColor || os.Getenv("NO_COLOR") != "" {
 			output.Disable()
 		}
+		ui.SetEnabled(!noColor && os.Getenv("NO_COLOR") == "")
 		return nil
 	}
 
