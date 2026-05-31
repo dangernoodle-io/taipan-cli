@@ -100,3 +100,36 @@ func TestPrintStats_NoASICFields(t *testing.T) {
 	assert.NotContains(t, out, "ASIC Temp:")
 	assert.NotContains(t, out, "ASIC Shares:")
 }
+
+// TestFmtHashrate covers all magnitude branches.
+func TestFmtHashrate(t *testing.T) {
+	assert.Equal(t, "1.00 TH/s", fmtHashrate(1e12))
+	assert.Equal(t, "1.50 GH/s", fmtHashrate(1.5e9))
+	assert.Equal(t, "2.00 MH/s", fmtHashrate(2e6))
+	assert.Equal(t, "1.00 kH/s", fmtHashrate(1e3))
+	assert.Equal(t, "500.00 H/s", fmtHashrate(500))
+}
+
+// TestFmtDiff covers all magnitude branches.
+func TestFmtDiff(t *testing.T) {
+	assert.Equal(t, "1.00T", fmtDiff(1e12))
+	assert.Equal(t, "2.00G", fmtDiff(2e9))
+	assert.Equal(t, "3.00M", fmtDiff(3e6))
+	assert.Equal(t, "4.00k", fmtDiff(4e3))
+	assert.Equal(t, "0.0625", fmtDiff(0.0625))
+}
+
+// TestFmtUptime covers hours, minutes-only, and seconds-only branches.
+func TestFmtUptime(t *testing.T) {
+	assert.Contains(t, fmtUptime(3661), "1h")
+	assert.Contains(t, fmtUptime(90), "1m")
+	assert.Equal(t, "45s", fmtUptime(45))
+}
+
+// TestFmtLastShare covers all branches including "never".
+func TestFmtLastShare(t *testing.T) {
+	assert.Equal(t, "never", fmtLastShare(-1))
+	assert.Contains(t, fmtLastShare(3661), "1h")
+	assert.Contains(t, fmtLastShare(90), "1m")
+	assert.Contains(t, fmtLastShare(5), "5s ago")
+}

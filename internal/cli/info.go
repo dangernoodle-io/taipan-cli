@@ -59,12 +59,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	results := make([]infoResult, len(targetDevices))
-	g := ui.NewGroup()
-	lines := make([]*ui.Line, len(targetDevices))
-	for i, d := range targetDevices {
-		lines[i] = g.Add("querying " + d.Hostname)
-	}
-	g.Start()
+	stop := ui.Single("Querying devices…")
 
 	var wg sync.WaitGroup
 	for i, d := range targetDevices {
@@ -75,15 +70,13 @@ func runInfo(cmd *cobra.Command, args []string) error {
 			info, err := client.Info(context.Background())
 			if err != nil {
 				results[idx] = infoResult{err: err}
-				lines[idx].Error(dev.Hostname + ": " + err.Error())
 			} else {
 				results[idx] = infoResult{info: info}
-				lines[idx].Complete(dev.Hostname)
 			}
 		}(i, d)
 	}
 	wg.Wait()
-	g.Stop()
+	stop()
 
 	var errCount int
 	for i, d := range targetDevices {

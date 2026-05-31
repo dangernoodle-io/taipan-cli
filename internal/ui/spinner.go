@@ -2,8 +2,10 @@ package ui
 
 import (
 	"os"
+	"time"
 
-	"github.com/chelnak/ysmrr"
+	"github.com/briandowns/spinner"
+	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
 )
 
@@ -18,75 +20,24 @@ var isTTY = func() bool { return isatty.IsTerminal(os.Stderr.Fd()) }
 
 func active() bool { return enabled && isTTY() }
 
-// Group manages a set of related spinners.
-type Group struct {
-	sm ysmrr.SpinnerManager
-	on bool
-}
-
-// NewGroup creates a new spinner group. When inactive (not a TTY or disabled),
-// all methods are safe no-ops that produce no output.
-func NewGroup() *Group {
-	if !active() {
-		return &Group{on: false}
-	}
-	sm := ysmrr.NewSpinnerManager(ysmrr.WithWriter(os.Stderr))
-	return &Group{sm: sm, on: true}
-}
-
-// Line wraps a single spinner line.
-type Line struct{ s *ysmrr.Spinner }
-
-// Add adds a new spinner line with the given message.
-func (g *Group) Add(msg string) *Line {
-	if !g.on {
-		return &Line{}
-	}
-	return &Line{s: g.sm.AddSpinner(msg)}
-}
-
-// Start starts all spinners in the group.
-func (g *Group) Start() {
-	if g.on {
-		g.sm.Start()
-	}
-}
-
-// Stop stops all spinners in the group.
-func (g *Group) Stop() {
-	if g.on {
-		g.sm.Stop()
-	}
-}
-
-// Update updates the spinner message.
-func (l *Line) Update(msg string) {
-	if l.s != nil {
-		l.s.UpdateMessage(msg)
-	}
-}
-
-// Complete marks the spinner as complete with a message.
-func (l *Line) Complete(msg string) {
-	if l.s != nil {
-		l.s.CompleteWithMessage(msg)
-	}
-}
-
-// Error marks the spinner as error with a message.
-func (l *Line) Error(msg string) {
-	if l.s != nil {
-		l.s.ErrorWithMessage(msg)
-	}
-}
-
-// Single is a one-line spinner convenience; returns a stop func (no-op when inactive).
+// Single starts a transient spinner on stderr and returns a stop func that
+// clears the line. No-op (returns a no-op stop) when stderr isn't a TTY or
+// spinners are disabled. Spinners only start when active() (stderr is a TTY)
+// and the user hasn't disabled color, so forcing color on for the spinner's
+// lifetime is safe; we restore the prior color.NoColor on stop so result
+// output is unaffected.
 func Single(msg string) func() {
-	g := NewGroup()
-	if !g.on {
+	if !active() {
 		return func() {}
 	}
-	g.Add(msg)
-	g.Start()
-	return g.Stop
+	prev := color.NoColor
+	color.NoColor = false
+	s := spinner.New(spinner.CharSets[14], 80*time.Millisecond, spinner.WithWriter(os.Stderr))
+	_ = s.Color("cyan")
+	s.Suffix = " " + msg
+	s.Start()
+	return func() {
+		s.Stop()
+		color.NoColor = prev
+	}
 }

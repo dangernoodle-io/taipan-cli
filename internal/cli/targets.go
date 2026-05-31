@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ func resolveTargets(hosts []string, all bool, timeout int) ([]discover.DeviceInf
 		for _, h := range hosts {
 			out = append(out, directDevice(h))
 		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Hostname < out[j].Hostname })
 		return out, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
@@ -43,6 +45,7 @@ func resolveTargets(hosts []string, all bool, timeout int) ([]discover.DeviceInf
 	if err != nil {
 		return nil, err
 	}
+	sort.Slice(devices, func(i, j int) bool { return devices[i].Hostname < devices[j].Hostname })
 	if all {
 		return devices, nil
 	}

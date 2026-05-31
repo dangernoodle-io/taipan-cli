@@ -69,12 +69,7 @@ func runReboot(cmd *cobra.Command, args []string) error {
 	}
 
 	results := make([]rebootResult, len(targetDevices))
-	g := ui.NewGroup()
-	lines := make([]*ui.Line, len(targetDevices))
-	for i, d := range targetDevices {
-		lines[i] = g.Add("rebooting " + d.Hostname)
-	}
-	g.Start()
+	stop := ui.Single("Rebooting devices…")
 
 	var wg sync.WaitGroup
 	for i, d := range targetDevices {
@@ -85,14 +80,11 @@ func runReboot(cmd *cobra.Command, args []string) error {
 			_, err := client.Reboot(context.Background())
 			if err != nil {
 				results[idx] = rebootResult{err: err}
-				lines[idx].Error(dev.Hostname + ": " + err.Error())
-			} else {
-				lines[idx].Complete(dev.Hostname)
 			}
 		}(i, d)
 	}
 	wg.Wait()
-	g.Stop()
+	stop()
 
 	var errCount int
 	for i, d := range targetDevices {

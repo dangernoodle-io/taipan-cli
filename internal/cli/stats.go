@@ -59,12 +59,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	}
 
 	results := make([]statsResult, len(targetDevices))
-	g := ui.NewGroup()
-	lines := make([]*ui.Line, len(targetDevices))
-	for i, d := range targetDevices {
-		lines[i] = g.Add("querying " + d.Hostname)
-	}
-	g.Start()
+	stop := ui.Single("Querying devices…")
 
 	var wg sync.WaitGroup
 	for i, d := range targetDevices {
@@ -75,15 +70,13 @@ func runStats(cmd *cobra.Command, args []string) error {
 			s, err := client.Stats(context.Background())
 			if err != nil {
 				results[idx] = statsResult{err: err}
-				lines[idx].Error(dev.Hostname + ": " + err.Error())
 			} else {
 				results[idx] = statsResult{stats: s}
-				lines[idx].Complete(dev.Hostname)
 			}
 		}(i, d)
 	}
 	wg.Wait()
-	g.Stop()
+	stop()
 
 	var errCount int
 	for i, d := range targetDevices {
