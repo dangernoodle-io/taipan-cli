@@ -8,5 +8,4 @@ type DeviceInfo struct {
 	Board    string `json:"board"`
 	Version  string `json:"version"`
 	MAC      string `json:"mac"`
-	Worker   string `json:"worker"`
 }

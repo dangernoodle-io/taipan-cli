@@ -218,7 +218,7 @@ func updateDevice(device discover.DeviceInfo) error {
 	}
 }
 
-// reportBootedVersion polls /api/version after an OTA completes so the user
+// reportBootedVersion polls /api/info after an OTA completes so the user
 // sees the version the device actually rebooted into, not just the cached
 // pre-update "latest" string. Falls back to the expected value if the device
 // doesn't come back before the deadline.

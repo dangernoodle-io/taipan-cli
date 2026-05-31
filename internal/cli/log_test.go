@@ -54,7 +54,6 @@ func TestStreamDevice_SingleDevice(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
@@ -79,7 +78,6 @@ func TestStreamDevice_SkipsCommentsAndEmptyLines(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
@@ -94,21 +92,20 @@ func TestStreamDevice_SkipsCommentsAndEmptyLines(t *testing.T) {
 	assert.Equal(t, "line two", lines[1])
 }
 
-// TestStreamDevice_MultiDevice verifies that prefixFn adds worker prefix to each line.
+// TestStreamDevice_MultiDevice verifies that prefixFn adds hostname prefix to each line.
 func TestStreamDevice_MultiDevice(t *testing.T) {
 	sseBody := "data: payload one\n\ndata: payload two\n\n"
 	server := newSSEServer(t, sseBody)
 	defer server.Close()
 
 	device := discover.DeviceInfo{
-		Hostname: "test-device.local",
+		Hostname: "miner-01",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "miner-01",
 	}
 
-	prefixFn := func(worker string) string {
-		return "[" + worker + "] "
+	prefixFn := func(hostname string) string {
+		return "[" + hostname + "] "
 	}
 
 	var mu sync.Mutex
@@ -135,7 +132,6 @@ func TestStreamDevice_HTTPError(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
@@ -160,7 +156,6 @@ func TestStreamDevice_ContextCancellation(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -179,14 +174,13 @@ func TestStreamDevice_MutexSerialization(t *testing.T) {
 	defer server.Close()
 
 	device := discover.DeviceInfo{
-		Hostname: "test-device.local",
+		Hostname: "test-worker",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
-	prefixFn := func(worker string) string {
-		return "[" + worker + "] "
+	prefixFn := func(hostname string) string {
+		return "[" + hostname + "] "
 	}
 
 	var mu sync.Mutex
@@ -211,7 +205,6 @@ func TestStreamDevice_EmptyResponse(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
@@ -233,7 +226,6 @@ func TestStreamDevice_MixedFormatLines(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
@@ -259,7 +251,6 @@ func TestStreamDevice_DataLineWithoutPrefix(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
@@ -285,7 +276,6 @@ func TestStreamDevice_LongPayload(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
@@ -308,7 +298,6 @@ func TestStreamDevice_SpecialCharactersInPayload(t *testing.T) {
 		Hostname: "test-device.local",
 		IP:       "127.0.0.1",
 		Port:     extractPortFromURL(t, server.URL),
-		Worker:   "test-worker",
 	}
 
 	var mu sync.Mutex
