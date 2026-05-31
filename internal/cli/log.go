@@ -67,15 +67,15 @@ func runLog(cmd *cobra.Command, args []string) error {
 		var prefixFn func(string) string
 		if multi {
 			c := color.New(logPalette[i%len(logPalette)])
-			prefixFn = func(worker string) string {
-				return c.Sprintf("[%s] ", worker)
+			prefixFn = func(hostname string) string {
+				return c.Sprintf("[%s] ", hostname)
 			}
 		}
 
 		go func(d discover.DeviceInfo, pf func(string) string) {
 			defer wg.Done()
 			if err := streamDevice(ctx, d, pf, &mu); err != nil && ctx.Err() == nil {
-				output.Error("[%s] %v", d.Worker, err)
+				output.Error("[%s] %v", d.Hostname, err)
 			}
 		}(device, prefixFn)
 	}
@@ -122,7 +122,7 @@ func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func
 
 		if prefixFn != nil {
 			mu.Lock()
-			fmt.Println(prefixFn(device.Worker) + payload)
+			fmt.Println(prefixFn(device.Hostname) + payload)
 			mu.Unlock()
 		} else {
 			fmt.Println(payload)

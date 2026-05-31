@@ -65,12 +65,12 @@ func printTable(devices []discover.DeviceInfo) {
 		return
 	}
 
-	fmt.Printf("%-30s %-15s %-15s %-10s %-15s %-20s\n",
-		"Hostname", "IP", "Board", "Version", "Worker", "MAC")
-	fmt.Println(string(make([]byte, 120-20)))
+	fmt.Printf("%-30s %-15s %-15s %-10s %-20s\n",
+		"Hostname", "IP", "Board", "Version", "MAC")
+	fmt.Println(string(make([]byte, 100)))
 
 	for _, d := range devices {
-		fmt.Printf("%-30s %-15s %-15s %-10s %-15s %-20s\n",
-			d.Hostname, d.IP, d.Board, d.Version, d.Worker, d.MAC)
+		fmt.Printf("%-30s %-15s %-15s %-10s %-20s\n",
+			d.Hostname, d.IP, d.Board, d.Version, d.MAC)
 	}
 }

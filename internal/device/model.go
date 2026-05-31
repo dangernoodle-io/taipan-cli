@@ -17,25 +17,29 @@ type StatsResponse struct {
 	AsicTempC       *float64 `json:"asic_temp_c,omitempty"`
 }
 
+// InfoNetwork holds the network sub-object from GET /api/info.
+type InfoNetwork struct {
+	SSID string `json:"ssid"`
+}
+
 // InfoResponse represents the JSON response from GET /api/info.
 type InfoResponse struct {
-	Board       string  `json:"board"`
-	ProjectName string  `json:"project_name"`
-	Version     string  `json:"version"`
-	IDFVersion  string  `json:"idf_version"`
-	BuildDate   string  `json:"build_date"`
-	BuildTime   string  `json:"build_time"`
-	Cores       int     `json:"cores"`
-	MAC         string  `json:"mac"`
-	WorkerName  string  `json:"worker_name"`
-	SSID        string  `json:"ssid"`
-	TotalHeap   uint64  `json:"total_heap"`
-	FreeHeap    uint64  `json:"free_heap"`
-	FlashSize   uint32  `json:"flash_size"`
-	ResetReason string  `json:"reset_reason"`
-	WDTResets   int     `json:"wdt_resets"`
-	BootTime    *int64  `json:"boot_time,omitempty"`
-	AppSize     *uint32 `json:"app_size,omitempty"`
+	Board       string      `json:"board"`
+	ProjectName string      `json:"project_name"`
+	Version     string      `json:"version"`
+	IDFVersion  string      `json:"idf_version"`
+	BuildDate   string      `json:"build_date"`
+	BuildTime   string      `json:"build_time"`
+	Cores       int         `json:"cores"`
+	MAC         string      `json:"mac"`
+	Network     InfoNetwork `json:"network"`
+	TotalHeap   uint64      `json:"total_heap"`
+	FreeHeap    uint64      `json:"free_heap"`
+	FlashSize   uint32      `json:"flash_size"`
+	ResetReason string      `json:"reset_reason"`
+	WDTResets   int         `json:"wdt_resets"`
+	BootTime    *int64      `json:"boot_time,omitempty"`
+	AppSize     *uint32     `json:"app_size,omitempty"`
 }
 
 // SettingsResponse represents the JSON response from GET /api/settings.

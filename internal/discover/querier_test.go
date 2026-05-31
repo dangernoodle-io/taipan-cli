@@ -97,7 +97,6 @@ func TestDeviceFromEntry_BasicFields(t *testing.T) {
 	assert.Equal(t, "tdongle-s3", device.Board)
 	assert.Equal(t, "1.0.0", device.Version)
 	assert.Equal(t, "aa:bb:cc:dd:ee:ff", device.MAC)
-	assert.Equal(t, "", device.Worker) // Not in TXT records or HTTP response
 }
 
 func TestDeviceFromEntry_HTTPEnrichment(t *testing.T) {
@@ -105,10 +104,9 @@ func TestDeviceFromEntry_HTTPEnrichment(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(apiInfoResponse{
-			Board:      "bitaxe-601",
-			Version:    "2.0.0",
-			MAC:        "11:22:33:44:55:66",
-			WorkerName: "test-worker",
+			Board:   "bitaxe-601",
+			Version: "2.0.0",
+			MAC:     "11:22:33:44:55:66",
 		})
 	}))
 	defer srv.Close()
@@ -144,10 +142,9 @@ func TestDeviceFromEntry_HTTPEnrichment(t *testing.T) {
 	// Verify HTTP values override TXT values
 	assert.Equal(t, "127.0.0.1", device.IP)
 	assert.Equal(t, testPort, device.Port)
-	assert.Equal(t, "bitaxe-601", device.Board)    // overridden from HTTP
-	assert.Equal(t, "2.0.0", device.Version)        // overridden from HTTP
+	assert.Equal(t, "bitaxe-601", device.Board)     // overridden from HTTP
+	assert.Equal(t, "2.0.0", device.Version)         // overridden from HTTP
 	assert.Equal(t, "11:22:33:44:55:66", device.MAC) // overridden from HTTP
-	assert.Equal(t, "test-worker", device.Worker)   // populated from HTTP
 }
 
 func TestDeviceFromEntry_NoIPv4(t *testing.T) {

@@ -179,8 +179,7 @@ func TestInfo_OK(t *testing.T) {
 			BuildTime:   "12:34:56",
 			Cores:       2,
 			MAC:         "aa:bb:cc:dd:ee:ff",
-			WorkerName:  "rig01",
-			SSID:        "HomeWifi",
+			Network:     InfoNetwork{SSID: "HomeWifi"},
 			TotalHeap:   327680,
 			FreeHeap:    200000,
 			FlashSize:   4194304,
@@ -204,8 +203,7 @@ func TestInfo_OK(t *testing.T) {
 	assert.Equal(t, "v5.3.1", info.IDFVersion)
 	assert.Equal(t, 2, info.Cores)
 	assert.Equal(t, "aa:bb:cc:dd:ee:ff", info.MAC)
-	assert.Equal(t, "rig01", info.WorkerName)
-	assert.Equal(t, "HomeWifi", info.SSID)
+	assert.Equal(t, "HomeWifi", info.Network.SSID)
 	assert.Equal(t, uint64(327680), info.TotalHeap)
 	assert.Equal(t, uint64(200000), info.FreeHeap)
 	assert.Equal(t, uint32(4194304), info.FlashSize)
