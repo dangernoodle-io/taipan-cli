@@ -270,15 +270,15 @@ func resolveAndBuildNVS(cfg *config.Config, opts *FlashOptions) ([]byte, error) 
 	}
 
 	entries := []nvs.Entry{
-		{Namespace: "taipanminer", Key: "wifi_ssid", Type: "string", Value: resolved.WifiSSID},
-		{Namespace: "taipanminer", Key: "wifi_pass", Type: "string", Value: resolved.WifiPassword},
+		{Namespace: "bb_cfg", Key: "wifi_ssid", Type: "string", Value: resolved.WifiSSID},
+		{Namespace: "bb_cfg", Key: "wifi_pass", Type: "string", Value: resolved.WifiPassword},
 		{Namespace: "taipanminer", Key: "pool_host", Type: "string", Value: resolved.PoolHost},
 		{Namespace: "taipanminer", Key: "pool_port", Type: "u16", Value: resolved.PoolPort},
 		{Namespace: "taipanminer", Key: "pool_pass", Type: "string", Value: resolved.PoolPassword},
 		{Namespace: "taipanminer", Key: "wallet_addr", Type: "string", Value: resolved.Wallet},
 		{Namespace: "taipanminer", Key: "worker", Type: "string", Value: resolved.Worker},
-		{Namespace: "taipanminer", Key: "display_en", Type: "u8", Value: displayEnValue},
-		{Namespace: "taipanminer", Key: "provisioned", Type: "u8", Value: uint8(1)},
+		{Namespace: "bb_cfg", Key: "display_en", Type: "u8", Value: displayEnValue},
+		{Namespace: "bb_cfg", Key: "provisioned", Type: "u8", Value: uint8(1)},
 	}
 
 	return nvs.GenerateNVS(entries, nvs.DefaultPartSize)
