@@ -23,12 +23,20 @@ The `flash` command performs validation checks before writing to the device:
 
 1. **Firmware Validation** — Verifies the firmware binary contains the correct app descriptor and matches the specified board
 2. **Size Check** — Ensures the binary fits in the OTA partition (1.875 MB)
-3. **Device Cross-Check** — For OTA updates (via `--host`), verifies the remote device board matches `--board`. For serial flashing, validates the chip type matches the board
+3. **Device Cross-Check** — For OTA updates (via `--host`), verifies the remote device board matches `--board`. For serial flashing, opens the port in bootloader mode to confirm the device is reachable.
 
 To skip these checks, use the `--force` flag:
 
 ```shell
 taipan flash --board bitaxe-601 --force firmware.bin
+```
+
+### Supported Boards and Firmware Versions
+
+A board is supported iff the requested GitHub release publishes its asset. Use `--version` to flash a specific release tag; omit it for the latest release. Firmware is cached under the user cache directory keyed by release tag and reused regardless of age (GC'd after 24h for unused tags).
+
+```shell
+taipan flash --board bitaxe-601 --version v1.2.3
 ```
 
 ## Install

@@ -7,15 +7,15 @@ import (
 )
 
 var (
-	flashBoard       string
-	flashPort        string
-	flashProfile     string
-	flashLatest      bool
-	flashForce       bool
-	flashWifiSSID    string
+	flashBoard        string
+	flashPort         string
+	flashProfile      string
+	flashVersion      string
+	flashForce        bool
+	flashWifiSSID     string
 	flashWifiPassword string
-	flashYes         bool
-	flashOTA         bool
+	flashYes          bool
+	flashOTA          bool
 )
 
 var flashCmd = &cobra.Command{
@@ -29,7 +29,7 @@ func init() {
 	flashCmd.Flags().StringVarP(&flashBoard, "board", "b", "", "Board type (required)")
 	flashCmd.Flags().StringVarP(&flashPort, "port", "p", "", "Serial port")
 	flashCmd.Flags().StringVar(&flashProfile, "profile", "default", "Config profile")
-	flashCmd.Flags().BoolVar(&flashLatest, "latest", false, "Pull latest release from GitHub")
+	flashCmd.Flags().StringVar(&flashVersion, "version", "", "Release version/tag to flash (default: latest)")
 	flashCmd.Flags().BoolVar(&flashForce, "force", false, "Skip pre-flash checks")
 	flashCmd.Flags().StringVar(&flashWifiSSID, "wifi-ssid", "", "Override WiFi SSID")
 	flashCmd.Flags().StringVar(&flashWifiPassword, "wifi-password", "", "Override WiFi password")
@@ -58,6 +58,7 @@ func runFlash(cmd *cobra.Command, args []string) error {
 		WifiPassword: flashWifiPassword,
 		SkipConfirm:  flashYes,
 		Factory:      !flashOTA,
+		Version:      flashVersion,
 	}
 
 	return flash.Flash(opts)

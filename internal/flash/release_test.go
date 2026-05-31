@@ -1,60 +1,70 @@
 package flash
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDownloadLatestFirmware_Factory(t *testing.T) {
-	// Mock GitHub API server with factory asset
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/repos/test-owner/test-repo/releases/latest" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{
-				"tag_name": "v1.0.0",
-				"assets": [
-					{
-						"name": "taipanminer-test-board-factory.bin",
-						"browser_download_url": "%s/firmware.bin"
-					},
-					{
-						"name": "taipanminer-test-board.bin",
-						"browser_download_url": "%s/firmware-ota.bin"
-					}
-				]
-			}`, server.URL, server.URL)
-			return
-		}
-		if r.URL.Path == "/firmware.bin" {
-			w.Header().Set("Content-Type", "application/octet-stream")
-			_, _ = fmt.Fprint(w, "mock factory firmware content")
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
+// setupTest overrides package vars for testing; returns a teardown func.
+func setupTest(t *testing.T, apiBase string) {
+	t.Helper()
+	origBase := githubAPIBase
+	origOwner := repoOwner
+	origRepo := repoName
+	origCache := cacheDir
+	githubAPIBase = apiBase
 	repoOwner = "test-owner"
 	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
+	cacheDir = t.TempDir()
+	t.Cleanup(func() {
+		githubAPIBase = origBase
+		repoOwner = origOwner
+		repoName = origRepo
+		cacheDir = origCache
+	})
+}
 
-	asset, err := DownloadLatestFirmware("test-board", true)
+func makeServer(t *testing.T, extraAssets string, serveDownload bool) *httptest.Server {
+	t.Helper()
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/test-owner/test-repo/releases/latest" ||
+			r.URL.Path == "/repos/test-owner/test-repo/releases/tags/v1.0.0":
+			w.Header().Set("Content-Type", "application/json")
+			assets := `{"name":"taipanminer-test-board-factory.bin","browser_download_url":"` + srv.URL + `/factory.bin"},` +
+				`{"name":"taipanminer-test-board.bin","browser_download_url":"` + srv.URL + `/ota.bin"}`
+			if extraAssets != "" {
+				assets += "," + extraAssets
+			}
+			_, _ = fmt.Fprintf(w, `{"tag_name":"v1.0.0","assets":[%s]}`, assets)
+		case r.URL.Path == "/factory.bin" && serveDownload:
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = fmt.Fprint(w, "mock factory firmware content")
+		case r.URL.Path == "/ota.bin" && serveDownload:
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = fmt.Fprint(w, "mock ota firmware content")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestDownloadFirmware_Latest_Factory(t *testing.T) {
+	srv := makeServer(t, "", true)
+	setupTest(t, srv.URL)
+
+	asset, err := DownloadFirmware("test-board", true, "")
 	require.NoError(t, err)
 	require.NotNil(t, asset)
 
@@ -65,260 +75,173 @@ func TestDownloadLatestFirmware_Factory(t *testing.T) {
 	content, err := os.ReadFile(asset.Path)
 	require.NoError(t, err)
 	assert.Equal(t, "mock factory firmware content", string(content))
-
-	tmpDir := filepath.Dir(asset.Path)
-	_ = os.RemoveAll(tmpDir)
 }
 
-func TestDownloadLatestFirmware_OTA(t *testing.T) {
-	// Mock GitHub API server with OTA asset
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/repos/test-owner/test-repo/releases/latest" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{
-				"tag_name": "v1.0.0",
-				"assets": [
-					{
-						"name": "taipanminer-test-board.bin",
-						"browser_download_url": "%s/firmware.bin"
-					}
-				]
-			}`, server.URL)
-			return
-		}
-		if r.URL.Path == "/firmware.bin" {
-			w.Header().Set("Content-Type", "application/octet-stream")
-			_, _ = fmt.Fprint(w, "mock ota firmware content")
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
+func TestDownloadFirmware_Latest_OTA(t *testing.T) {
+	srv := makeServer(t, "", true)
+	setupTest(t, srv.URL)
 
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
-	repoOwner = "test-owner"
-	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
-
-	asset, err := DownloadLatestFirmware("test-board", false)
+	asset, err := DownloadFirmware("test-board", false, "")
 	require.NoError(t, err)
 	require.NotNil(t, asset)
 
 	assert.Equal(t, "taipanminer-test-board.bin", asset.Name)
 	assert.Equal(t, "v1.0.0", asset.Version)
-
-	tmpDir := filepath.Dir(asset.Path)
-	_ = os.RemoveAll(tmpDir)
+	assert.NotEmpty(t, asset.Path)
 }
 
-func TestDownloadLatestFirmware_NoMatchingAsset(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{
-			"tag_name": "v1.0.0",
-			"assets": [
-				{
-					"name": "taipanminer-other-board.bin",
-					"browser_download_url": "http://example.com/other.bin"
-				},
-				{
-					"name": "taipanminer-different-board-factory.bin",
-					"browser_download_url": "http://example.com/different.bin"
-				}
-			]
-		}`)
+func TestDownloadFirmware_ExplicitVersion_HitsTagsEndpoint(t *testing.T) {
+	reqPaths := make([]string, 0)
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqPaths = append(reqPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/test-owner/test-repo/releases/tags/v2.0.0":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"tag_name":"v2.0.0","assets":[{"name":"taipanminer-test-board-factory.bin","browser_download_url":"%s/fw.bin"}]}`, srv.URL)
+		case "/fw.bin":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = fmt.Fprint(w, "v2 firmware")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
-	defer server.Close()
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
 
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
-	repoOwner = "test-owner"
-	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
+	asset, err := DownloadFirmware("test-board", true, "v2.0.0")
+	require.NoError(t, err)
+	assert.Equal(t, "v2.0.0", asset.Version)
 
-	asset, err := DownloadLatestFirmware("test-board", false)
-	assert.Nil(t, asset)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no asset \"taipanminer-test-board.bin\" found")
-	assert.Contains(t, err.Error(), "taipanminer-other-board.bin")
-	assert.Contains(t, err.Error(), "taipanminer-different-board-factory.bin")
+	// Must not have hit /releases/latest
+	for _, p := range reqPaths {
+		assert.NotContains(t, p, "latest", "should not hit /latest endpoint when version is set")
+	}
 }
 
-func TestDownloadLatestFirmware_OTAExistsSuggestsSwap(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestDownloadFirmware_BoardNotFound_ListsAvailableBoards(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{
-			"tag_name": "v1.0.0",
-			"assets": [
-				{
-					"name": "taipanminer-test-board.bin",
-					"browser_download_url": "http://example.com/ota.bin"
-				}
-			]
-		}`)
+		_, _ = fmt.Fprintf(w, `{"tag_name":"v1.0.0","assets":[
+			{"name":"taipanminer-alpha-factory.bin","browser_download_url":"%s/fw.bin"},
+			{"name":"taipanminer-beta.bin","browser_download_url":"%s/fw.bin"},
+			{"name":"taipanminer-gamma-factory.bin","browser_download_url":"%s/fw.bin"},
+			{"name":"taipanminer-gamma.bin","browser_download_url":"%s/fw.bin"}
+		]}`, srv.URL, srv.URL, srv.URL, srv.URL)
 	}))
-	defer server.Close()
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
 
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
-	repoOwner = "test-owner"
-	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
+	_, err := DownloadFirmware("unknown-board", false, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `board "unknown-board" not available in release v1.0.0`)
+	assert.Contains(t, err.Error(), "alpha")
+	assert.Contains(t, err.Error(), "beta")
+	assert.Contains(t, err.Error(), "gamma")
+	// boards must be sorted
+	assert.Contains(t, err.Error(), "available boards: alpha, beta, gamma")
+}
 
-	asset, err := DownloadLatestFirmware("test-board", true)
-	assert.Nil(t, asset)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no asset \"taipanminer-test-board-factory.bin\" found")
+func TestDownloadFirmware_OTAExistsSuggestsSwap(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"tag_name":"v1.0.0","assets":[{"name":"taipanminer-test-board.bin","browser_download_url":"%s/fw.bin"}]}`, srv.URL)
+	}))
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
+
+	_, err := DownloadFirmware("test-board", true, "")
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "OTA image exists")
 	assert.Contains(t, err.Error(), "--ota")
 }
 
-func TestDownloadLatestFirmware_FactoryExistsSuggestsSwap(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestDownloadFirmware_FactoryExistsSuggestsSwap(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{
-			"tag_name": "v1.0.0",
-			"assets": [
-				{
-					"name": "taipanminer-test-board-factory.bin",
-					"browser_download_url": "http://example.com/factory.bin"
-				}
-			]
-		}`)
+		_, _ = fmt.Fprintf(w, `{"tag_name":"v1.0.0","assets":[{"name":"taipanminer-test-board-factory.bin","browser_download_url":"%s/fw.bin"}]}`, srv.URL)
 	}))
-	defer server.Close()
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
 
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
-	repoOwner = "test-owner"
-	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
-
-	asset, err := DownloadLatestFirmware("test-board", false)
-	assert.Nil(t, asset)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no asset \"taipanminer-test-board.bin\" found")
+	_, err := DownloadFirmware("test-board", false, "")
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "factory image exists")
 	assert.Contains(t, err.Error(), "omit --ota")
 }
 
-func TestDownloadLatestFirmware_NoReleases(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestDownloadFirmware_NoReleases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{
-			"tag_name": "v1.0.0",
-			"assets": []
-		}`)
+		_, _ = fmt.Fprint(w, `{"tag_name":"v1.0.0","assets":[]}`)
 	}))
-	defer server.Close()
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
 
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
-	repoOwner = "test-owner"
-	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
-
-	asset, err := DownloadLatestFirmware("test-board", false)
-	assert.Nil(t, asset)
-	assert.Error(t, err)
+	_, err := DownloadFirmware("test-board", false, "")
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no releases found")
 }
 
-func TestDownloadLatestFirmware_HTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestDownloadFirmware_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
 
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
-	repoOwner = "test-owner"
-	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
-
-	asset, err := DownloadLatestFirmware("test-board", false)
-	assert.Nil(t, asset)
-	assert.Error(t, err)
+	_, err := DownloadFirmware("test-board", false, "")
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "github api returned status 500")
 }
 
-func TestDownloadLatestFirmware_DownloadError(t *testing.T) {
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/repos/test-owner/test-repo/releases/latest" {
+func TestDownloadFirmware_DigestPresent_Verified(t *testing.T) {
+	content := "verified firmware content"
+	h := sha256.Sum256([]byte(content))
+	digest := "sha256:" + hex.EncodeToString(h[:])
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/test-owner/test-repo/releases/latest":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{
-				"tag_name": "v1.0.0",
-				"assets": [
-					{
-						"name": "taipanminer-test-board.bin",
-						"browser_download_url": "%s/firmware.bin"
-					}
-				]
-			}`, server.URL)
-			return
-		}
-		if r.URL.Path == "/firmware.bin" {
+			_, _ = fmt.Fprintf(w, `{"tag_name":"v1.0.0","assets":[{"name":"taipanminer-test-board-factory.bin","browser_download_url":"%s/fw.bin","digest":"%s"}]}`, srv.URL, digest)
+		case "/fw.bin":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = fmt.Fprint(w, content)
+		default:
 			w.WriteHeader(http.StatusNotFound)
-			return
 		}
-		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
 
-	oldBase := githubAPIBase
-	oldOwner := repoOwner
-	oldRepo := repoName
-	githubAPIBase = server.URL
-	repoOwner = "test-owner"
-	repoName = "test-repo"
-	defer func() {
-		githubAPIBase = oldBase
-		repoOwner = oldOwner
-		repoName = oldRepo
-	}()
+	asset, err := DownloadFirmware("test-board", true, "")
+	require.NoError(t, err)
+	assert.Equal(t, hex.EncodeToString(h[:]), asset.SHA256)
+}
 
-	asset, err := DownloadLatestFirmware("test-board", false)
-	assert.Nil(t, asset)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to download asset")
-	assert.Contains(t, err.Error(), "download returned status 404")
+func TestDownloadFirmware_DigestMismatch_Error(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/test-owner/test-repo/releases/latest":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"tag_name":"v1.0.0","assets":[{"name":"taipanminer-test-board-factory.bin","browser_download_url":"%s/fw.bin","digest":"sha256:deadbeef"}]}`, srv.URL)
+		case "/fw.bin":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = fmt.Fprint(w, "actual firmware content")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	setupTest(t, srv.URL)
+
+	_, err := DownloadFirmware("test-board", true, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sha256 mismatch")
 }
