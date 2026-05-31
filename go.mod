@@ -3,7 +3,7 @@ module github.com/dangernoodle-io/taipan-cli
 go 1.26.1
 
 require (
-	github.com/chelnak/ysmrr v0.6.0
+	github.com/briandowns/spinner v1.23.2
 	github.com/fatih/color v1.19.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/mattn/go-isatty v0.0.20

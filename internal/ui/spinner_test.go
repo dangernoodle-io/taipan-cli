@@ -4,45 +4,44 @@ import (
 	"os"
 	"testing"
 
+	"github.com/fatih/color"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestInactiveWhenDisabled(t *testing.T) {
-	orig := enabled
+	origEnabled := enabled
 	origTTY := isTTY
 	defer func() {
-		enabled = orig
+		enabled = origEnabled
 		isTTY = origTTY
 	}()
 
 	SetEnabled(false)
 	isTTY = func() bool { return true }
 
-	g := NewGroup()
-	assert.False(t, g.on)
+	assert.False(t, active())
 }
 
 func TestInactiveWhenNotTTY(t *testing.T) {
-	orig := enabled
+	origEnabled := enabled
 	origTTY := isTTY
 	defer func() {
-		enabled = orig
+		enabled = origEnabled
 		isTTY = origTTY
 	}()
 
 	SetEnabled(true)
 	isTTY = func() bool { return false }
 
-	g := NewGroup()
-	assert.False(t, g.on)
+	assert.False(t, active())
 }
 
 func TestNoOpWhenInactive(t *testing.T) {
-	orig := enabled
+	origEnabled := enabled
 	origTTY := isTTY
 	defer func() {
-		enabled = orig
+		enabled = origEnabled
 		isTTY = origTTY
 	}()
 
@@ -56,15 +55,6 @@ func TestNoOpWhenInactive(t *testing.T) {
 	os.Stderr = w
 	defer func() { os.Stderr = origStderr }()
 
-	g := NewGroup()
-	l := g.Add("test")
-	g.Start()
-	l.Update("updated")
-	l.Complete("done")
-	l.Error("oops")
-	g.Stop()
-
-	// Single convenience function.
 	stop := Single("msg")
 	stop()
 
@@ -77,10 +67,10 @@ func TestNoOpWhenInactive(t *testing.T) {
 }
 
 func TestSingleActive(t *testing.T) {
-	orig := enabled
+	origEnabled := enabled
 	origTTY := isTTY
 	defer func() {
-		enabled = orig
+		enabled = origEnabled
 		isTTY = origTTY
 	}()
 
@@ -88,36 +78,47 @@ func TestSingleActive(t *testing.T) {
 	isTTY = func() bool { return true }
 
 	stop := Single("working...")
+	require.NotNil(t, stop)
 	stop()
 }
 
-func TestActiveGroup(t *testing.T) {
-	orig := enabled
+func TestSingleRestoresColorNoColor(t *testing.T) {
+	origEnabled := enabled
 	origTTY := isTTY
+	origNoColor := color.NoColor
 	defer func() {
-		enabled = orig
+		enabled = origEnabled
 		isTTY = origTTY
+		color.NoColor = origNoColor
 	}()
 
 	SetEnabled(true)
 	isTTY = func() bool { return true }
 
-	g := NewGroup()
-	assert.True(t, g.on)
-	require.NotNil(t, g.sm)
+	// Set a known value before calling Single
+	color.NoColor = true
+	stop := Single("working...")
+	// After stop, it should be restored
+	require.NotNil(t, stop)
+	stop()
+	assert.Equal(t, true, color.NoColor, "color.NoColor should be restored to original value")
+}
 
-	l := g.Add("loading...")
-	assert.NotNil(t, l.s)
+func TestSingleDisabledLeavesColorNoColorUntouched(t *testing.T) {
+	origEnabled := enabled
+	origTTY := isTTY
+	origNoColor := color.NoColor
+	defer func() {
+		enabled = origEnabled
+		isTTY = origTTY
+		color.NoColor = origNoColor
+	}()
 
-	g.Start()
-	assert.True(t, g.sm.Running())
+	SetEnabled(false)
+	isTTY = func() bool { return true }
 
-	l.Update("updating...")
-	l.Complete("done")
-
-	l2 := g.Add("another...")
-	l2.Error("failed")
-
-	g.Stop()
-	assert.False(t, g.sm.Running())
+	color.NoColor = false
+	stop := Single("working...")
+	stop()
+	assert.Equal(t, false, color.NoColor, "color.NoColor should not change when Single is disabled")
 }

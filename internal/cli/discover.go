@@ -11,6 +11,7 @@ import (
 
 	"github.com/dangernoodle-io/taipan-cli/internal/discover"
 	"github.com/dangernoodle-io/taipan-cli/internal/output"
+	"github.com/dangernoodle-io/taipan-cli/internal/ui"
 )
 
 var (
@@ -30,10 +31,16 @@ func init() {
 }
 
 func runDiscover(cmd *cobra.Command, args []string) error {
+	if discoverJSON {
+		ui.SetEnabled(false)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(discoverTimeout)*time.Second)
 	defer cancel()
 
+	stop := ui.Single("Discovering devices…")
 	devices, err := discover.Browse(ctx)
+	stop()
 	if err != nil {
 		return err
 	}

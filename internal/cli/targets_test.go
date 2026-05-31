@@ -38,3 +38,13 @@ func TestResolveTargets_FastPath(t *testing.T) {
 	assert.Equal(t, "h.local", devices[0].IP)
 	assert.Equal(t, 80, devices[0].Port)
 }
+
+// TestResolveTargets_FastPath_HostnameSorted verifies that explicit --host values
+// are returned in hostname order regardless of input order.
+func TestResolveTargets_FastPath_HostnameSorted(t *testing.T) {
+	devices, err := resolveTargets([]string{"b.local", "a.local"}, false, 5)
+	require.NoError(t, err)
+	require.Len(t, devices, 2)
+	assert.Equal(t, "a.local", devices[0].Hostname, "first device must be a.local")
+	assert.Equal(t, "b.local", devices[1].Hostname, "second device must be b.local")
+}
