@@ -8,11 +8,20 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/dangernoodle-io/taipan-cli/internal/device"
 	"github.com/dangernoodle-io/taipan-cli/internal/discover"
+)
+
+// viewMode controls whether we show the fleet list or device detail.
+type viewMode int
+
+const (
+	modeList   viewMode = iota
+	modeDetail viewMode = iota
 )
 
 // tickMsg is the periodic refresh signal.
@@ -39,6 +48,7 @@ func discoverCmd(fn func() ([]discover.DeviceInfo, error)) tea.Cmd {
 type deviceState struct {
 	stats   *device.StatsResponse
 	pool    *device.PoolResponse
+	info    *device.InfoResponse
 	err     error
 	updated time.Time
 }
@@ -56,6 +66,8 @@ type Model struct {
 	targets     []discover.DeviceInfo
 	state       map[string]deviceState
 	spin        spinner.Model
+	vp          viewport.Model
+	mode        viewMode
 	discovering bool
 	discoverErr error
 	ready       bool
@@ -86,6 +98,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.vp.Width = msg.Width
+		m.vp.Height = msg.Height - 4 // reserve header + footer lines
+		if m.mode == modeDetail {
+			m.vp.SetContent(renderDetail(m))
+		}
 		return m, nil
 
 	case discoveredMsg:
@@ -110,11 +127,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state[msg.Host] = deviceState{
 			stats:   msg.Stats,
 			pool:    msg.Pool,
+			info:    msg.Info,
 			err:     msg.Err,
 			updated: time.Now(),
 		}
 		if !m.ready && len(m.targets) > 0 && len(m.state) >= len(m.targets) {
 			m.ready = true
+		}
+		if m.mode == modeDetail {
+			m.vp.SetContent(renderDetail(m))
 		}
 		return m, nil
 
@@ -136,17 +157,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "up", "k":
+			if m.mode == modeDetail {
+				m.vp.ScrollUp(1)
+				return m, nil
+			}
 			if m.selected > 0 {
 				m.selected--
 			}
 			return m, nil
 		case "down", "j":
+			if m.mode == modeDetail {
+				m.vp.ScrollDown(1)
+				return m, nil
+			}
 			if m.selected < len(m.targets)-1 {
 				m.selected++
 			}
 			return m, nil
-		case "enter", "esc":
-			// reserved for PR2
+		case "enter":
+			if m.mode == modeList && m.ready && len(m.targets) > 0 {
+				m.mode = modeDetail
+				m.vp.Width = m.width
+				m.vp.Height = m.height - 4
+				m.vp.GotoTop()
+				m.vp.SetContent(renderDetail(m))
+			}
+			return m, nil
+		case "esc":
+			if m.mode == modeDetail {
+				m.mode = modeList
+			}
 			return m, nil
 		}
 	}
@@ -174,6 +214,15 @@ func (m Model) View() string {
 		}
 		querying := fmt.Sprintf("  %s  Querying %d %s…", m.spin.View(), len(m.targets), plural)
 		return "\n" + querying + "\n"
+	}
+
+	if m.mode == modeDetail {
+		content := renderDetail(m)
+		if m.height > 4 && m.vp.Height > 0 {
+			m.vp.SetContent(content)
+			return m.vp.View() + "\n" + renderDetailFooter()
+		}
+		return content + "\n" + renderDetailFooter()
 	}
 
 	return renderBanner(m) + "\n" + renderHeader(m) + "\n" + renderRows(m) + "\n" + renderFooter()
