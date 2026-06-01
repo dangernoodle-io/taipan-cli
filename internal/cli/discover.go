@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -72,12 +73,19 @@ func printTable(devices []discover.DeviceInfo) {
 		return
 	}
 
-	fmt.Printf("%-30s %-15s %-15s %-10s %-20s\n",
-		"Hostname", "IP", "Board", "Version", "MAC")
-	fmt.Println(string(make([]byte, 100)))
-
+	hw, iw, bw, vw := len("Hostname"), len("IP"), len("Board"), len("Version")
 	for _, d := range devices {
-		fmt.Printf("%-30s %-15s %-15s %-10s %-20s\n",
-			d.Hostname, d.IP, d.Board, d.Version, d.MAC)
+		hw = max(hw, len(d.Hostname))
+		iw = max(iw, len(d.IP))
+		bw = max(bw, len(d.Board))
+		vw = max(vw, len(d.Version))
+	}
+
+	// two-space gutters; last column unpadded to avoid trailing whitespace
+	rowFmt := fmt.Sprintf("%%-%ds  %%-%ds  %%-%ds  %%s\n", hw, iw, bw)
+	fmt.Printf(rowFmt, "Hostname", "IP", "Board", "Version")
+	fmt.Println(strings.Repeat("-", hw+iw+bw+vw+6))
+	for _, d := range devices {
+		fmt.Printf(rowFmt, d.Hostname, d.IP, d.Board, d.Version)
 	}
 }

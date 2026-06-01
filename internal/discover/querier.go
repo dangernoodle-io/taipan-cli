@@ -19,7 +19,6 @@ var httpClient = &http.Client{Timeout: 8 * time.Second}
 type apiInfoResponse struct {
 	Board   string `json:"board"`
 	Version string `json:"version"`
-	MAC     string `json:"mac"`
 }
 
 func deviceFromEntry(e *zeroconf.ServiceEntry) DeviceInfo {
@@ -36,9 +35,8 @@ func deviceFromEntry(e *zeroconf.ServiceEntry) DeviceInfo {
 	txt := parseTXT(e.Text)
 	info.Board = txt["board"]
 	info.Version = txt["version"]
-	info.MAC = txt["mac"]
 
-	// Enrich from /api/info (board/version/mac override stale TXT values).
+	// Enrich from /api/info (board/version override stale TXT values).
 	if info.IP != "" {
 		infoURL := fmt.Sprintf("http://%s:%d/api/info", info.IP, info.Port)
 		if resp, err := httpClient.Get(infoURL); err == nil {
@@ -51,9 +49,6 @@ func deviceFromEntry(e *zeroconf.ServiceEntry) DeviceInfo {
 					}
 					if apiResp.Version != "" {
 						info.Version = apiResp.Version
-					}
-					if apiResp.MAC != "" {
-						info.MAC = apiResp.MAC
 					}
 				}
 			}()

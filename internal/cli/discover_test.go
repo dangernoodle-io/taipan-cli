@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,8 +14,8 @@ import (
 
 func testDevices() []discover.DeviceInfo {
 	return []discover.DeviceInfo{
-		{Hostname: "taipan-a.local", IP: "192.168.1.10", Port: 80, Board: "tdongle-s3", Version: "v1.0.0", MAC: "aa:bb:cc:dd:ee:ff"},
-		{Hostname: "taipan-b.local", IP: "192.168.1.11", Port: 80, Board: "tdongle-s3", Version: "v1.0.0", MAC: "11:22:33:44:55:66"},
+		{Hostname: "taipan-a.local", IP: "192.168.1.10", Port: 80, Board: "tdongle-s3", Version: "v1.0.0"},
+		{Hostname: "taipan-b.local", IP: "192.168.1.11", Port: 80, Board: "tdongle-s3", Version: "v1.0.0"},
 	}
 }
 
@@ -28,6 +29,48 @@ func TestPrintTable_WithDevices(t *testing.T) {
 	assert.Contains(t, out, "192.168.1.10")
 }
 
+// TestPrintTable_HeaderHasNoMAC verifies the header contains the expected columns and not MAC.
+func TestPrintTable_HeaderHasNoMAC(t *testing.T) {
+	out := captureStdout(t, func() {
+		printTable(testDevices())
+	})
+	lines := strings.Split(out, "\n")
+	require.Greater(t, len(lines), 1)
+	header := lines[0]
+	assert.Contains(t, header, "Hostname")
+	assert.Contains(t, header, "IP")
+	assert.Contains(t, header, "Board")
+	assert.Contains(t, header, "Version")
+	assert.NotContains(t, header, "MAC")
+}
+
+// TestPrintTable_LongBoardAndDevVersion verifies long board names and dev version strings are not truncated.
+func TestPrintTable_LongBoardAndDevVersion(t *testing.T) {
+	devices := []discover.DeviceInfo{
+		{Hostname: "taipan-a.local", IP: "192.168.1.10", Port: 80, Board: "esp32-c3-supermini", Version: "(development build)"},
+		{Hostname: "taipan-b.local", IP: "192.168.1.11", Port: 80, Board: "tdongle-s3", Version: "v1.0.0"},
+	}
+	out := captureStdout(t, func() {
+		printTable(devices)
+	})
+	// Both long strings must appear untruncated
+	assert.Contains(t, out, "esp32-c3-supermini")
+	assert.Contains(t, out, "(development build)")
+	// Header Board column must be wide enough (padded to board name width)
+	lines := strings.Split(out, "\n")
+	require.Greater(t, len(lines), 3)
+	// The data row for the long board must show both board and version
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "esp32-c3-supermini") {
+			assert.Contains(t, line, "(development build)")
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected row with long board name")
+}
+
 // TestPrintTable_Empty verifies printTable warns when no devices found.
 func TestPrintTable_Empty(t *testing.T) {
 	out := captureStdout(t, func() {
@@ -36,23 +79,24 @@ func TestPrintTable_Empty(t *testing.T) {
 	_ = out // warning goes to stderr; just ensure no panic
 }
 
-// TestPrintJSON_ValidOutput verifies printJSON emits valid JSON array.
+// TestPrintJSON_ValidOutput verifies printJSON emits valid JSON array with no mac key.
 func TestPrintJSON_ValidOutput(t *testing.T) {
 	devices := testDevices()
 	out := captureStdout(t, func() {
 		err := printJSON(devices)
 		require.NoError(t, err)
 	})
-	var parsed []discover.DeviceInfo
+	var parsed []map[string]interface{}
 	require.NoError(t, json.Unmarshal([]byte(out), &parsed))
 	assert.Len(t, parsed, 2)
-	assert.Equal(t, "taipan-a.local", parsed[0].Hostname)
+	assert.Equal(t, "taipan-a.local", parsed[0]["hostname"])
+	// mac key must not appear
+	_, hasMac := parsed[0]["mac"]
+	assert.False(t, hasMac, "JSON output must not contain mac key")
 }
 
 // TestRunDiscover_JSONFlag_DisablesSpinner verifies --json path disables ui and produces JSON.
 func TestRunDiscover_JSONFlag_DisablesSpinner(t *testing.T) {
-	// We can't easily mock discover.Browse here, so we test the printJSON path directly.
-	// This covers the discoverJSON=true branch of runDiscover indirectly via printJSON.
 	out := captureStdout(t, func() {
 		err := printJSON(testDevices())
 		require.NoError(t, err)

@@ -28,13 +28,11 @@ func TestParseTXT_MultipleRecords(t *testing.T) {
 	records := []string{
 		"board=tdongle-s3",
 		"version=1.0.0",
-		"mac=aa:bb:cc:dd:ee:ff",
 	}
 	result := parseTXT(records)
 	expected := map[string]string{
 		"board":   "tdongle-s3",
 		"version": "1.0.0",
-		"mac":     "aa:bb:cc:dd:ee:ff",
 	}
 	assert.Equal(t, expected, result)
 }
@@ -47,8 +45,8 @@ func TestParseTXT_NoEquals(t *testing.T) {
 	}
 	result := parseTXT(records)
 	expected := map[string]string{
-		"validkey":    "value",
-		"anotherkey":  "anothervalue",
+		"validkey":   "value",
+		"anotherkey": "anothervalue",
 	}
 	assert.Equal(t, expected, result)
 }
@@ -83,7 +81,6 @@ func TestDeviceFromEntry_BasicFields(t *testing.T) {
 		Text: []string{
 			"board=tdongle-s3",
 			"version=1.0.0",
-			"mac=aa:bb:cc:dd:ee:ff",
 		},
 	}
 
@@ -96,7 +93,6 @@ func TestDeviceFromEntry_BasicFields(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", device.IP)
 	assert.Equal(t, "tdongle-s3", device.Board)
 	assert.Equal(t, "1.0.0", device.Version)
-	assert.Equal(t, "aa:bb:cc:dd:ee:ff", device.MAC)
 }
 
 func TestDeviceFromEntry_HTTPEnrichment(t *testing.T) {
@@ -106,7 +102,6 @@ func TestDeviceFromEntry_HTTPEnrichment(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(apiInfoResponse{
 			Board:   "bitaxe-601",
 			Version: "2.0.0",
-			MAC:     "11:22:33:44:55:66",
 		})
 	}))
 	defer srv.Close()
@@ -127,7 +122,6 @@ func TestDeviceFromEntry_HTTPEnrichment(t *testing.T) {
 		Text: []string{
 			"board=tdongle-s3",
 			"version=1.0.0",
-			"mac=aa:bb:cc:dd:ee:ff",
 		},
 	}
 
@@ -142,9 +136,8 @@ func TestDeviceFromEntry_HTTPEnrichment(t *testing.T) {
 	// Verify HTTP values override TXT values
 	assert.Equal(t, "127.0.0.1", device.IP)
 	assert.Equal(t, testPort, device.Port)
-	assert.Equal(t, "bitaxe-601", device.Board)     // overridden from HTTP
-	assert.Equal(t, "2.0.0", device.Version)         // overridden from HTTP
-	assert.Equal(t, "11:22:33:44:55:66", device.MAC) // overridden from HTTP
+	assert.Equal(t, "bitaxe-601", device.Board)  // overridden from HTTP
+	assert.Equal(t, "2.0.0", device.Version)      // overridden from HTTP
 }
 
 func TestDeviceFromEntry_NoIPv4(t *testing.T) {
@@ -156,7 +149,6 @@ func TestDeviceFromEntry_NoIPv4(t *testing.T) {
 		Text: []string{
 			"board=tdongle-s3",
 			"version=1.0.0",
-			"mac=aa:bb:cc:dd:ee:ff",
 		},
 	}
 
@@ -169,5 +161,4 @@ func TestDeviceFromEntry_NoIPv4(t *testing.T) {
 	assert.Equal(t, "", device.IP)
 	assert.Equal(t, "tdongle-s3", device.Board)
 	assert.Equal(t, "1.0.0", device.Version)
-	assert.Equal(t, "aa:bb:cc:dd:ee:ff", device.MAC)
 }
