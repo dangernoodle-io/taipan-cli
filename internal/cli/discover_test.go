@@ -71,6 +71,32 @@ func TestPrintTable_LongBoardAndDevVersion(t *testing.T) {
 	assert.True(t, found, "expected row with long board name")
 }
 
+// TestPrintTable_ColumnSpacing verifies each column is padded to content width + 7 spaces.
+func TestPrintTable_ColumnSpacing(t *testing.T) {
+	// "Hostname" (8) is the widest in its column; IP col starts at offset 8+7=15
+	devices := []discover.DeviceInfo{
+		{Hostname: "miner", IP: "10.0.0.1", Port: 80, Board: "tdongle-s3", Version: "v1.0.0"},
+	}
+	out := captureStdout(t, func() {
+		printTable(devices)
+	})
+	lines := strings.Split(out, "\n")
+	require.Greater(t, len(lines), 2)
+	header := lines[0]
+	sep := lines[1]
+
+	// "Hostname" is 8 chars; gap=7; IP starts at position 15
+	hostnameIdx := strings.Index(header, "Hostname")
+	require.GreaterOrEqual(t, hostnameIdx, 0)
+	ipIdx := strings.Index(header, "IP")
+	require.GreaterOrEqual(t, ipIdx, 0)
+	assert.Equal(t, 8+7, ipIdx-hostnameIdx, "IP column should start at Hostname width + 7")
+
+	// separator length == hw+iw+bw+vw + gap*3
+	// hw=8 ("Hostname"), iw=8 ("10.0.0.1"), bw=10 ("tdongle-s3"), vw=7 ("Version"), gap*3=21
+	assert.Equal(t, 8+8+10+7+21, len(sep))
+}
+
 // TestPrintTable_Empty verifies printTable warns when no devices found.
 func TestPrintTable_Empty(t *testing.T) {
 	out := captureStdout(t, func() {

@@ -81,10 +81,11 @@ func printTable(devices []discover.DeviceInfo) {
 		vw = max(vw, len(d.Version))
 	}
 
-	// two-space gutters; last column unpadded to avoid trailing whitespace
-	rowFmt := fmt.Sprintf("%%-%ds  %%-%ds  %%-%ds  %%s\n", hw, iw, bw)
+	// pad each column to its content width + 7 spaces; last column unpadded
+	const gap = 7
+	rowFmt := fmt.Sprintf("%%-%ds%%-%ds%%-%ds%%s\n", hw+gap, iw+gap, bw+gap)
 	fmt.Printf(rowFmt, "Hostname", "IP", "Board", "Version")
-	fmt.Println(strings.Repeat("-", hw+iw+bw+vw+6))
+	fmt.Println(strings.Repeat("-", hw+iw+bw+vw+gap*3))
 	for _, d := range devices {
 		fmt.Printf(rowFmt, d.Hostname, d.IP, d.Board, d.Version)
 	}
