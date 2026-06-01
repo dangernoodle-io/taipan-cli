@@ -88,7 +88,7 @@ func TestDeviceFromEntry_BasicFields(t *testing.T) {
 	device := deviceFromEntry(entry)
 
 	// Verify fields are populated from TXT records
-	assert.Equal(t, "test-device.local.", device.Hostname)
+	assert.Equal(t, "test-device.local", device.Hostname)
 	assert.Equal(t, testPort, device.Port)
 	assert.Equal(t, "127.0.0.1", device.IP)
 	assert.Equal(t, "tdongle-s3", device.Board)
@@ -156,7 +156,7 @@ func TestDeviceFromEntry_NoIPv4(t *testing.T) {
 	device := deviceFromEntry(entry)
 
 	// Verify TXT values are still populated and IP is empty
-	assert.Equal(t, "test-device.local.", device.Hostname)
+	assert.Equal(t, "test-device.local", device.Hostname)
 	assert.Equal(t, 8080, device.Port)
 	assert.Equal(t, "", device.IP)
 	assert.Equal(t, "tdongle-s3", device.Board)

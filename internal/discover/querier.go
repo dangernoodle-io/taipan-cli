@@ -23,7 +23,7 @@ type apiInfoResponse struct {
 
 func deviceFromEntry(e *zeroconf.ServiceEntry) DeviceInfo {
 	info := DeviceInfo{
-		Hostname: e.HostName,
+		Hostname: strings.TrimSuffix(e.HostName, "."),
 		Port:     e.Port,
 	}
 
