@@ -60,7 +60,7 @@ taipan
     --host HOSTNAME          # target specific device(s) (repeatable)
     --all                    # monitor all discovered devices (default when no --host given)
     --timeout, -t            # discovery timeout in seconds (default 5)
-                             # keybindings: r refresh · ↑/↓ or k/j scroll · q quit
+                             # keybindings: r refresh · ↑/↓ or k/j scroll · enter detail · esc back · q quit
 ```
 
 ## Install

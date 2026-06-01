@@ -723,15 +723,179 @@ func TestModel_SpinnerTick_WhileQueryingNotReady(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
-func TestModel_EnterEscKeys(t *testing.T) {
-	// "enter" and "esc" are reserved (no-ops) — hits lines 148-150.
+// ── detail mode ───────────────────────────────────────────────────────────────
+
+// setupDetailReady builds a ready model with Info populated on miner-a.
+func setupDetailReady(t *testing.T) Model {
+	t.Helper()
 	m := setupTwoMiners(t)
-	for _, key := range []string{"enter", "esc"} {
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
-		m2 := updated.(Model)
-		assert.Nil(t, cmd, "key %q should produce nil cmd", key)
-		assert.Equal(t, m.selected, m2.selected)
+	// inject Info into miner-a state
+	st := m.state["miner-a"]
+	st.info = &device.InfoResponse{
+		Board:       "esp32s3",
+		Version:     "v1.2.3",
+		IDFVersion:  "v5.2.1",
+		ResetReason: "power_on",
+		TotalHeap:   524288,
+		FreeHeap:    262144,
+		Network:     device.InfoNetwork{SSID: "home-wifi"},
 	}
+	m.state["miner-a"] = st
+
+	// inject pool worker into miner-a
+	st2 := m.state["miner-a"]
+	// pool already set by setupTwoMiners (hmpool.io), add worker
+	if st2.pool != nil {
+		p := *st2.pool
+		p.Worker = "acme-worker"
+		st2.pool = &p
+		m.state["miner-a"] = st2
+	}
+	return m
+}
+
+func TestModel_EnterKey_SwitchesToDetailMode(t *testing.T) {
+	m := setupDetailReady(t)
+	m.width = 120
+	m.height = 40
+	assert.Equal(t, modeList, m.mode)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+	assert.Equal(t, modeDetail, m2.mode)
+	assert.Nil(t, cmd)
+}
+
+func TestModel_EscKey_ReturnsToListMode(t *testing.T) {
+	m := setupDetailReady(t)
+	m.width = 120
+	m.height = 40
+	m.mode = modeDetail
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m2 := updated.(Model)
+	assert.Equal(t, modeList, m2.mode)
+	assert.Nil(t, cmd)
+}
+
+func TestModel_EscKey_InListMode_Noop(t *testing.T) {
+	m := setupTwoMiners(t)
+	assert.Equal(t, modeList, m.mode)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m2 := updated.(Model)
+	assert.Equal(t, modeList, m2.mode)
+	assert.Nil(t, cmd)
+}
+
+func TestModel_QuitKey_WorksInDetailMode(t *testing.T) {
+	m := setupDetailReady(t)
+	m.mode = modeDetail
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	require.NotNil(t, cmd)
+	assert.Equal(t, tea.Quit(), cmd())
+}
+
+func TestModel_DetailView_ContainsHostAndData(t *testing.T) {
+	m := setupDetailReady(t)
+	m.width = 120
+	m.height = 40
+	m.mode = modeDetail
+
+	view := m.View()
+	assert.Contains(t, view, "miner-a")
+	// hashrate from miner-a (310 GH/s)
+	assert.Contains(t, view, "GH/s")
+	// pool worker
+	assert.Contains(t, view, "acme-worker")
+	// ssid from info
+	assert.Contains(t, view, "home-wifi")
+	// footer hints
+	assert.Contains(t, view, "esc back")
+	assert.Contains(t, view, "q quit")
+}
+
+func TestModel_DetailView_NoPanic_AtWindowSize(t *testing.T) {
+	m := setupDetailReady(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.mode = modeDetail
+	assert.NotPanics(t, func() { _ = m.View() })
+}
+
+func TestModel_DetailView_OfflineDevice(t *testing.T) {
+	m := NewModel(stubDiscover(makeTargets(), nil))
+	updated, _ := m.Update(discoveredMsg{targets: makeTargets()})
+	m = updated.(Model)
+
+	// both offline
+	updated, _ = m.Update(PolledMsg{Host: "miner-a", Err: fmt.Errorf("connection refused")})
+	m = updated.(Model)
+	updated, _ = m.Update(PolledMsg{Host: "miner-b", Err: fmt.Errorf("connection refused")})
+	m = updated.(Model)
+
+	m.width = 120
+	m.height = 40
+	m.mode = modeDetail
+
+	view := m.View()
+	assert.Contains(t, view, "miner-a")
+	assert.Contains(t, view, "offline")
+}
+
+func TestModel_UpDown_InDetailMode_DoesNotChangeSelection(t *testing.T) {
+	m := setupDetailReady(t)
+	m.width = 120
+	m.height = 40
+	m.mode = modeDetail
+	m.selected = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m2 := updated.(Model)
+	assert.Equal(t, 0, m2.selected, "down in detail mode must not move selection")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	m3 := updated.(Model)
+	assert.Equal(t, 0, m3.selected, "up in detail mode must not move selection")
+}
+
+func TestModel_EnterKey_InListModeNotReady_Noop(t *testing.T) {
+	// enter before ready should not switch to detail mode
+	m := NewModel(stubDiscover(makeTargets(), nil))
+	updated, _ := m.Update(discoveredMsg{targets: makeTargets()})
+	m = updated.(Model)
+	assert.False(t, m.ready)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+	assert.Equal(t, modeList, m2.mode)
+}
+
+func TestModel_PolledMsg_UpdatesDetailViewport(t *testing.T) {
+	// while in detail mode, a PolledMsg triggers a content refresh (no panic)
+	m := setupDetailReady(t)
+	m.width = 120
+	m.height = 40
+	m.mode = modeDetail
+
+	assert.NotPanics(t, func() {
+		m.Update(PolledMsg{
+			Host:  "miner-a",
+			Stats: &device.StatsResponse{Hashrate: 1e12, TempC: 55},
+			Pool:  &device.PoolResponse{Host: "hmpool.io", Port: 3337, Worker: "acme-worker", Connected: true},
+		})
+	})
+}
+
+func TestModel_WindowSizeMsg_InDetailMode_UpdatesViewport(t *testing.T) {
+	m := setupDetailReady(t)
+	m.mode = modeDetail
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m2 := updated.(Model)
+	assert.Equal(t, 100, m2.width)
+	assert.Equal(t, 30, m2.height)
 }
 
 func TestModel_UnknownMsg_Fallthrough(t *testing.T) {

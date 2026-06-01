@@ -19,6 +19,7 @@ type PolledMsg struct {
 	Host  string
 	Stats *device.StatsResponse
 	Pool  *device.PoolResponse
+	Info  *device.InfoResponse
 	Err   error
 }
 
@@ -35,10 +36,11 @@ func pollDevice(d discover.DeviceInfo) tea.Cmd {
 			return PolledMsg{Host: d.Hostname, Err: err}
 		}
 
-		// Pool failure is non-fatal — keep stats.
+		// Pool and Info failures are non-fatal — keep stats.
 		pool, _ := c.Pool(ctx)
+		info, _ := c.Info(ctx)
 
-		return PolledMsg{Host: d.Hostname, Stats: stats, Pool: pool}
+		return PolledMsg{Host: d.Hostname, Stats: stats, Pool: pool, Info: info}
 	}
 }
 

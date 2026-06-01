@@ -16,6 +16,10 @@ import (
 )
 
 func newTestServer(t *testing.T, statsCode int, poolCode int) (*httptest.Server, discover.DeviceInfo) {
+	return newTestServerWithInfo(t, statsCode, poolCode, http.StatusOK)
+}
+
+func newTestServerWithInfo(t *testing.T, statsCode int, poolCode int, infoCode int) (*httptest.Server, discover.DeviceInfo) {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -48,6 +52,23 @@ func newTestServer(t *testing.T, statsCode int, poolCode int) (*httptest.Server,
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(p)
 	})
+	mux.HandleFunc("/api/info", func(w http.ResponseWriter, _ *http.Request) {
+		if infoCode != http.StatusOK {
+			w.WriteHeader(infoCode)
+			return
+		}
+		i := device.InfoResponse{
+			Board:       "esp32s3",
+			Version:     "v1.2.3",
+			IDFVersion:  "v5.2.1",
+			ResetReason: "power_on",
+			TotalHeap:   524288,
+			FreeHeap:    262144,
+			Network:     device.InfoNetwork{SSID: "test-ssid"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(i)
+	})
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -58,12 +79,12 @@ func newTestServer(t *testing.T, statsCode int, poolCode int) (*httptest.Server,
 	_, err = fmt.Sscanf(portStr, "%d", &port)
 	require.NoError(t, err)
 
-	info := discover.DeviceInfo{
+	devInfo := discover.DeviceInfo{
 		Hostname: "test-miner",
 		IP:       host,
 		Port:     port,
 	}
-	return srv, info
+	return srv, devInfo
 }
 
 func TestPollDevice_Success(t *testing.T) {
@@ -82,6 +103,22 @@ func TestPollDevice_Success(t *testing.T) {
 	assert.InDelta(t, 500_000.0, polled.Stats.Hashrate, 0.1)
 	require.NotNil(t, polled.Pool)
 	assert.Equal(t, "pool.example.com", polled.Pool.Host)
+	require.NotNil(t, polled.Info, "info should be populated on success")
+	assert.Equal(t, "esp32s3", polled.Info.Board)
+	assert.Equal(t, "test-ssid", polled.Info.Network.SSID)
+}
+
+func TestPollDevice_InfoError_NonFatal(t *testing.T) {
+	_, info := newTestServerWithInfo(t, http.StatusOK, http.StatusOK, http.StatusInternalServerError)
+
+	msg := pollDevice(info)()
+	polled, ok := msg.(PolledMsg)
+	require.True(t, ok)
+
+	assert.NoError(t, polled.Err)
+	require.NotNil(t, polled.Stats)
+	require.NotNil(t, polled.Pool)
+	assert.Nil(t, polled.Info, "info error should be non-fatal")
 }
 
 func TestPollDevice_StatsError(t *testing.T) {
