@@ -102,4 +102,4 @@ Profile-based configuration at `~/.config/taipan/config.yml`. Profiles define Wi
 
 ## Dependencies
 
-- `tinygo.org/x/espflasher` (via jgangemi/espflasher fork) — ESP chip flasher and NVS library
+- `tinygo.org/x/espflasher v0.6.1` — ESP chip flasher and NVS library

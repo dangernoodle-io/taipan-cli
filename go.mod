@@ -15,7 +15,7 @@ require (
 	go.bug.st/serial v1.6.2
 	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
-	tinygo.org/x/espflasher v0.0.0-00010101000000-000000000000
+	tinygo.org/x/espflasher v0.6.1
 )
 
 require (
@@ -49,5 +49,3 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 )
-
-replace tinygo.org/x/espflasher => github.com/jgangemi/espflasher v0.0.0-20260425160512-0b39023b136a
