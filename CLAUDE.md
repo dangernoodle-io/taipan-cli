@@ -56,6 +56,11 @@ taipan
     --all                    # reboot all discovered devices
     --timeout, -t            # discovery timeout in seconds (default 5)
     --force                  # skip confirmation prompt
+  monitor [flags]            # live fleet dashboard (bubbletea TUI); requires an interactive terminal
+    --host HOSTNAME          # target specific device(s) (repeatable)
+    --all                    # monitor all discovered devices (default when no --host given)
+    --timeout, -t            # discovery timeout in seconds (default 5)
+                             # keybindings: r refresh · ↑/↓ or k/j scroll · q quit
 ```
 
 ## Install
@@ -93,6 +98,7 @@ Profile-based configuration at `~/.config/taipan/config.yml`. Profiles define Wi
 | `internal/ota/` | OTA update client (check, trigger, poll status) |
 | `internal/output/` | Colored terminal output |
 | `internal/ui/` | Activity spinners (briandowns/spinner); single transient spinner that clears on stop; auto-off on non-TTY, `--json`, `--no-color`/`NO_COLOR` |
+| `internal/tui/` | Bubble Tea TUI models; `monitor` fleet table (poll.go + model.go) |
 
 ## Dependencies
 
