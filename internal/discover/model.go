@@ -7,5 +7,4 @@ type DeviceInfo struct {
 	Port     int    `json:"port"`
 	Board    string `json:"board"`
 	Version  string `json:"version"`
-	MAC      string `json:"mac"`
 }
