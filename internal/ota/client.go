@@ -3,6 +3,7 @@ package ota
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,11 @@ import (
 var httpClient = &http.Client{
 	Timeout: 60 * time.Second,
 }
+
+// ErrCheckUnavailable is returned by Check when the device does not expose the
+// update-check routes (e.g. boot-mode / bb_ota_boot devices). Callers may
+// treat this as a swallowable condition and proceed to Trigger.
+var ErrCheckUnavailable = errors.New("update check routes unavailable on device")
 
 type CheckResult struct {
 	CurrentVersion  string `json:"current_version"`
@@ -31,7 +37,7 @@ type StatusResult struct {
 	State       string  `json:"state"`
 	InProgress  bool    `json:"in_progress"`
 	ProgressPct float64 `json:"progress_pct"`
-	LastError   string `json:"last_error"`
+	LastError   string  `json:"last_error"`
 }
 
 type Client struct {
@@ -47,10 +53,14 @@ func NewClient(ip string, port int) *Client {
 	}
 }
 
-// Check kicks the device's update-check worker and polls /api/update/status
-// until last_check_ts advances and the outcome is terminal. Returns a CheckResult on success.
+// Check performs a best-effort update status query. It optionally POSTs
+// /api/update/check first (tolerating 404/unsupported), then GETs
+// /api/update/status once and returns whatever the device reports.
+//
+// If the device does not expose these routes (404 / 405 / connection error),
+// Check returns (nil, ErrCheckUnavailable) so callers can swallow the error
+// and proceed to Trigger directly.
 func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
-	// Snapshot current ts before kick so we can detect advancement.
 	type statusResp struct {
 		Current     string `json:"current"`
 		Latest      string `json:"latest"`
@@ -59,73 +69,60 @@ func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
 		DownloadURL string `json:"download_url"`
 		Outcome     string `json:"outcome"`
 	}
-	fetchStatus := func() (*statusResp, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/update/status", nil)
-		if err != nil {
-			return nil, fmt.Errorf("create request: %w", err)
-		}
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("request failed: %w", err)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode == http.StatusServiceUnavailable {
-			return nil, fmt.Errorf("device update check not initialized")
-		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, body)
-		}
-		var s statusResp
-		if err := json.Unmarshal(body, &s); err != nil {
-			return nil, fmt.Errorf("decode response: %w", err)
-		}
-		return &s, nil
-	}
 
-	before, err := fetchStatus()
-	if err != nil {
-		return nil, fmt.Errorf("pre-kick status: %w", err)
-	}
-	beforeTs := before.LastCheckTs
-
-	// Kick the check worker.
+	// Best-effort POST /api/update/check — tolerate 404 / 405 / network errors.
 	kickReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/update/check", nil)
 	if err != nil {
-		return nil, fmt.Errorf("create kick request: %w", err)
+		return nil, ErrCheckUnavailable
 	}
-	kickResp, err := c.httpClient.Do(kickReq)
-	if err != nil {
-		return nil, fmt.Errorf("kick request failed: %w", err)
+	kickResp, kickErr := c.httpClient.Do(kickReq)
+	if kickErr == nil {
+		_, _ = io.ReadAll(kickResp.Body)
+		_ = kickResp.Body.Close()
+		if kickResp.StatusCode == http.StatusNotFound || kickResp.StatusCode == http.StatusMethodNotAllowed {
+			return nil, ErrCheckUnavailable
+		}
 	}
-	_, _ = io.ReadAll(kickResp.Body)
-	_ = kickResp.Body.Close()
-	if kickResp.StatusCode != http.StatusOK && kickResp.StatusCode != http.StatusAccepted {
-		return nil, fmt.Errorf("kick failed: %d", kickResp.StatusCode)
+	// Network error on kick — device may not support the route at all.
+	if kickErr != nil {
+		return nil, ErrCheckUnavailable
 	}
 
-	// Poll /api/update/status until ts advances and outcome is terminal (not "unknown").
-	for {
-		s, err := fetchStatus()
-		if err != nil {
-			return nil, err
-		}
-		if s.LastCheckTs > beforeTs && s.Outcome != "unknown" {
-			return &CheckResult{
-				CurrentVersion:  s.Current,
-				LatestVersion:   s.Latest,
-				UpdateAvailable: s.Available,
-				Outcome:         s.Outcome,
-				DownloadURL:     s.DownloadURL,
-			}, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(2 * time.Second):
-			// retry
-		}
+	// GET /api/update/status — single shot, no polling.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/update/status", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
 	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, ErrCheckUnavailable
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return nil, ErrCheckUnavailable
+	case http.StatusServiceUnavailable:
+		return nil, fmt.Errorf("device update check not initialized")
+	case http.StatusOK:
+		// fall through
+	default:
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, body)
+	}
+
+	var s statusResp
+	if err := json.Unmarshal(body, &s); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return &CheckResult{
+		CurrentVersion:  s.Current,
+		LatestVersion:   s.Latest,
+		UpdateAvailable: s.Available,
+		Outcome:         s.Outcome,
+		DownloadURL:     s.DownloadURL,
+	}, nil
 }
 
 // Trigger initiates an OTA update on the device. Returns the result, HTTP status code, and error.

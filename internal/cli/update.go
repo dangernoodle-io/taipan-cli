@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -49,8 +50,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Update each device serially. Surface every per-device failure inline so
-	// a miner that errors early (e.g. /api/ota/check 500) doesn't silently
-	// disappear from the output behind the single "Error: ..." tail.
+	// a miner that errors early doesn't silently disappear from the output.
 	var updateErrors []error
 	for _, device := range targetDevices {
 		if err := updateDevice(device); err != nil {
@@ -98,39 +98,51 @@ func updateDevice(device discover.DeviceInfo) error {
 	hostname := device.Hostname
 	client := ota.NewClient(device.IP, device.Port)
 
-	// Check for available updates (30s backstop to prevent infinite hang)
+	// Best-effort pre-check (30s backstop). Boot-mode devices may not expose
+	// the check routes — if unavailable, proceed directly to Trigger.
 	checkCtx, checkCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer checkCancel()
 	stopCheck := ui.Single("checking " + hostname)
-	checkResult, err := client.Check(checkCtx)
+	checkResult, checkErr := client.Check(checkCtx)
 	stopCheck()
-	if err != nil {
-		return fmt.Errorf("[%s] check failed: %w", hostname, err)
+
+	checkUnavailable := errors.Is(checkErr, ota.ErrCheckUnavailable)
+
+	if checkErr != nil && !checkUnavailable {
+		return fmt.Errorf("[%s] check failed: %w", hostname, checkErr)
 	}
 
-	currentVersion := checkResult.CurrentVersion
-	latestVersion := checkResult.LatestVersion
+	// If check succeeded, honour early-return outcomes.
+	if checkResult != nil {
+		currentVersion := checkResult.CurrentVersion
+		latestVersion := checkResult.LatestVersion
+		output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
 
-	output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
-
-	switch checkResult.Outcome {
-	case "available":
-		// proceed to trigger below
-	case "up_to_date":
-		output.Success("[%s] already up to date (%s)", hostname, currentVersion)
-		return nil
-	case "no_asset":
-		output.Warn("[%s] no firmware published for this board", hostname)
-		return nil
-	case "check_failed":
-		return fmt.Errorf("[%s] update check failed (device could not complete the release check)", hostname)
-	default:
-		return fmt.Errorf("[%s] unexpected update check outcome %q", hostname, checkResult.Outcome)
+		switch checkResult.Outcome {
+		case "available":
+			output.Info("[%s] updating %s → %s", hostname, currentVersion, latestVersion)
+		case "up_to_date":
+			output.Success("[%s] already up to date (%s)", hostname, currentVersion)
+			return nil
+		case "no_asset":
+			output.Warn("[%s] no firmware published for this board", hostname)
+			return nil
+		case "check_failed":
+			return fmt.Errorf("[%s] update check failed (device could not complete the release check)", hostname)
+		default:
+			return fmt.Errorf("[%s] unexpected update check outcome %q", hostname, checkResult.Outcome)
+		}
+	} else {
+		output.Info("[%s] pre-check unavailable, proceeding to trigger", hostname)
 	}
 
-	output.Info("[%s] updating %s → %s", hostname, currentVersion, latestVersion)
+	// latestVersion is used for reporting; fall back to empty if check skipped.
+	latestVersion := ""
+	if checkResult != nil {
+		latestVersion = checkResult.LatestVersion
+	}
 
-	// Trigger the update (30s backstop)
+	// Trigger the update (30s backstop).
 	triggerCtx, triggerCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer triggerCancel()
 	triggerResult, statusCode, err := client.Trigger(triggerCtx)
@@ -138,14 +150,20 @@ func updateDevice(device discover.DeviceInfo) error {
 		return fmt.Errorf("[%s] trigger failed: %w", hostname, err)
 	}
 
-	// Handle status codes
+	// Handle by trigger status string first (firmware-level semantics), then
+	// fall through to status-code handling for the pull path.
+	if triggerResult != nil && triggerResult.Status == "rebooting_for_boot_mode_ota" {
+		return handleBootModeTrigger(client, hostname, latestVersion)
+	}
+
+	// Handle HTTP status codes (pull path and edge cases).
 	switch statusCode {
-	case 202: // Continue to poll
-		// Proceed to poll loop
-	case 200: // Already up to date
+	case 202:
+		// pull path (status "update_started") — fall through to the poll loop below
+	case 200:
 		output.Success("[%s] update already completed (%s)", hostname, latestVersion)
 		return nil
-	case 409: // Update already in progress
+	case 409:
 		output.Warn("[%s] update already in progress, polling status", hostname)
 		// Continue to poll loop
 	default:
@@ -155,7 +173,67 @@ func updateDevice(device discover.DeviceInfo) error {
 		return fmt.Errorf("[%s] trigger returned unexpected status %d", hostname, statusCode)
 	}
 
-	// Poll for completion with 5min timeout and 2s interval
+	return pollPullUpdate(client, hostname, latestVersion)
+}
+
+// handleBootModeTrigger handles the boot-mode OTA path. The device reboots
+// immediately after acknowledging the trigger; it pulls the firmware at next
+// boot. We wait for it to come back up and verify the version.
+func handleBootModeTrigger(client *ota.Client, hostname, expected string) error {
+	output.Info("[%s] rebooting to apply OTA (boot-mode)…", hostname)
+
+	// Best-effort: poll /api/update/progress briefly for a progress bar.
+	// The device may 404 immediately — ignore any error here.
+	progressCtx, progressCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer progressCancel()
+	progressTicker := time.NewTicker(2 * time.Second)
+	defer progressTicker.Stop()
+	progressDone := false
+	for !progressDone {
+		select {
+		case <-progressCtx.Done():
+			progressDone = true
+		case <-progressTicker.C:
+			status, err := client.PollStatus(progressCtx)
+			if err != nil {
+				// Device already gone (rebooting) or route not available — stop polling.
+				progressDone = true
+				continue
+			}
+			if status.InProgress || status.State != "idle" {
+				fmt.Printf("\r[%s] %s: %.0f%%\033[K", hostname, status.State, status.ProgressPct)
+			}
+			if status.State == "complete" || status.State == "error" {
+				progressDone = true
+			}
+		}
+	}
+	fmt.Printf("\n")
+
+	// Wait for device to come back and verify booted version.
+	bootCtx, bootCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer bootCancel()
+	booted, err := client.WaitForBoot(bootCtx, 3*time.Second)
+	if err != nil || booted == "" {
+		output.Success("[%s] boot-mode OTA applied (expected %s; device not yet responding)", hostname, expected)
+		return nil
+	}
+	if expected != "" {
+		expNorm := strings.TrimPrefix(expected, "v")
+		bootNorm := strings.TrimPrefix(booted, "v")
+		if bootNorm != expNorm {
+			output.Warn("[%s] boot-mode OTA applied but booted %s (expected %s)", hostname, booted, expected)
+			return nil
+		}
+	}
+	output.Success("[%s] boot-mode OTA completed (%s)", hostname, booted)
+	return nil
+}
+
+// pollPullUpdate polls /api/update/progress for a pull-mode OTA until
+// completion, error, or timeout. Network errors are treated as success only
+// after progress has been observed (sawProgress guard).
+func pollPullUpdate(client *ota.Client, hostname, latestVersion string) error {
 	pollCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -177,10 +255,10 @@ func updateDevice(device discover.DeviceInfo) error {
 		case <-ticker.C:
 			status, err := client.PollStatus(pollCtx)
 
-			// Connection error during poll likely means device restarted
+			// Connection error during poll likely means device restarted after
+			// a successful pull OTA — but ONLY if we already saw progress.
 			if err != nil {
-				// Check if it's a network error (connection refused, etc.)
-				if isNetworkError(err) {
+				if isNetworkError(err) && sawProgress {
 					fmt.Printf("\n")
 					output.Success("[%s] update completed (%s)", hostname, latestVersion)
 					return nil
@@ -247,13 +325,15 @@ func isNetworkError(err error) bool {
 		return false
 	}
 
-	// Check for connection refused or other network-level errors
-	if _, ok := err.(net.Error); ok {
+	// Check for net.Error anywhere in the error chain (handles wrapped errors).
+	var netErr net.Error
+	if errors.As(err, &netErr) {
 		return true
 	}
 
-	// Check error message strings for common network errors
-	errMsg := err.Error()
+	// Check error message strings for common network errors (including EOF
+	// from abrupt connection close during device reboot).
+	errMsg := strings.ToLower(err.Error())
 	networkErrors := []string{
 		"connection refused",
 		"connection reset",
@@ -261,10 +341,11 @@ func isNetworkError(err error) bool {
 		"i/o timeout",
 		"network unreachable",
 		"host unreachable",
+		"eof",
 	}
 
 	for _, netErr := range networkErrors {
-		if strings.Contains(strings.ToLower(errMsg), netErr) {
+		if strings.Contains(errMsg, netErr) {
 			return true
 		}
 	}

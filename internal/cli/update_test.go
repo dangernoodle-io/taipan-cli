@@ -45,7 +45,15 @@ func TestReportBootedVersion_Unreachable(t *testing.T) {
 // expected version.
 func TestReportBootedVersion_MatchingVersion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("v0.7.5"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"version":"v0.7.5"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
@@ -57,7 +65,15 @@ func TestReportBootedVersion_MatchingVersion(t *testing.T) {
 // reportBootedVersion should handle a mismatched booted version gracefully.
 func TestReportBootedVersion_Mismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("v0.7.4"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"version":"v0.7.4"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
@@ -97,22 +113,20 @@ func checkStatusBody(current, latest string, ts int64, outcome string) string {
 		current, latest, ts, outcome)
 }
 
-// newCheckServer returns an httptest.Server that sequences through the
-// pre-kick GET → POST kick → poll GET pattern used by ota.Client.Check,
-// ending at the given terminal outcome.
+// newCheckServer returns an httptest.Server that handles the best-effort
+// Check flow (POST kick → single GET status) with the given terminal outcome.
 func newCheckServer(t *testing.T, terminalOutcome string) *httptest.Server {
 	t.Helper()
-	var reqCount atomic.Int32
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reqCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		switch n {
-		case 1: // pre-kick GET /api/update/status
-			_, _ = w.Write([]byte(checkStatusBody("v1.0.0", "v1.1.0", 100, "unknown")))
-		case 2: // POST /api/update/check
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // poll — ts advanced, terminal outcome
+		case "/api/update/status":
 			_, _ = w.Write([]byte(checkStatusBody("v1.0.0", "v1.1.0", 200, terminalOutcome)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 }
@@ -165,4 +179,151 @@ func TestUpdateDevice_DefaultOutcome(t *testing.T) {
 	err := updateDevice(dev)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected update check outcome")
+}
+
+// TestUpdateDevice_BootMode_CheckUnavailable_ThenTrigger tests the full boot-mode
+// path: check routes return 404 (swallowed), trigger returns
+// rebooting_for_boot_mode_ota, device reboots and comes back on expected version.
+func TestUpdateDevice_BootMode_CheckUnavailable_ThenTrigger(t *testing.T) {
+	var applyCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			// Boot-mode device: check route absent.
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/update/apply":
+			applyCount.Add(1)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"rebooting_for_boot_mode_ota"}`))
+		case "/api/update/progress":
+			// Device already rebooting — 404.
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"version":"v1.1.0"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port := parseTestHostPort(t, server.URL)
+	dev := discover.DeviceInfo{Hostname: "test-s2", IP: host, Port: port}
+
+	err := updateDevice(dev)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), applyCount.Load(), "apply must be called exactly once")
+}
+
+// TestUpdateDevice_BootMode_VersionMismatch tests that a version mismatch after
+// boot-mode OTA is reported as a warning but NOT an error.
+func TestUpdateDevice_BootMode_VersionMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/update/apply":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"rebooting_for_boot_mode_ota"}`))
+		case "/api/update/progress":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			// Returns older version than expected.
+			_, _ = w.Write([]byte(`{"version":"v1.0.0"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port := parseTestHostPort(t, server.URL)
+	dev := discover.DeviceInfo{Hostname: "test-s2", IP: host, Port: port}
+
+	// Should succeed (warn only) even when booted version != expected.
+	err := updateDevice(dev)
+	assert.NoError(t, err)
+}
+
+// TestUpdateDevice_BootMode_WithPreCheck tests boot-mode path where the pre-check
+// succeeds (returns "available") before the trigger returns boot-mode status.
+func TestUpdateDevice_BootMode_WithPreCheck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		case "/api/update/status":
+			_, _ = w.Write([]byte(checkStatusBody("v1.0.0", "v1.1.0", 200, "available")))
+		case "/api/update/apply":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"rebooting_for_boot_mode_ota"}`))
+		case "/api/update/progress":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"version":"v1.1.0"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port := parseTestHostPort(t, server.URL)
+	dev := discover.DeviceInfo{Hostname: "test-s2", IP: host, Port: port}
+
+	err := updateDevice(dev)
+	require.NoError(t, err)
+}
+
+// TestPollPullUpdate_NetworkErrorWithoutProgress ensures a network error during
+// polling does NOT falsely report success when no progress was observed yet.
+func TestPollPullUpdate_NetworkErrorWithoutProgress(t *testing.T) {
+	// Close a listener immediately so PollStatus hits connection refused on
+	// the very first poll (simulates a device that goes away before OTA starts).
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	client := ota.NewClient("127.0.0.1", port)
+	err = pollPullUpdate(client, "test-device", "v1.1.0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "poll failed")
+}
+
+// TestPollPullUpdate_NetworkErrorAfterProgress ensures a network error during
+// polling IS treated as success when progress was already observed (pull path
+// device reboot after flash).
+func TestPollPullUpdate_NetworkErrorAfterProgress(t *testing.T) {
+	var reqCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			// First poll: in-progress (sets sawProgress).
+			_, _ = w.Write([]byte(`{"state":"updating","in_progress":true,"progress_pct":50}`))
+			return
+		}
+		// Subsequent polls: close connection to simulate reboot.
+		hj, ok := w.(http.Hijacker)
+		if ok {
+			conn, _, _ := hj.Hijack()
+			_ = conn.Close()
+		}
+	}))
+	defer server.Close()
+
+	host, port := parseTestHostPort(t, server.URL)
+	client := ota.NewClient(host, port)
+
+	err := pollPullUpdate(client, "test-device", "v1.1.0")
+	// After seeing progress, a network error is success.
+	assert.NoError(t, err)
 }
