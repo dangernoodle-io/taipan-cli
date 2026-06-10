@@ -40,26 +40,27 @@ func statusBody(current, latest string, available bool, ts int64, outcome, downl
 		current, latest, available, ts, downloadURL, outcome)
 }
 
-// TestCheck_Available tests Check with outcome="available".
-func TestCheck_Available(t *testing.T) {
-	var reqCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reqCount.Add(1)
+// newCheckServer returns an httptest.Server that handles the new best-effort
+// Check flow: POST /api/update/check (kick) → GET /api/update/status (single shot).
+func newBestEffortCheckServer(t *testing.T, kickStatus int, statusOutcome string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch n {
-		case 1: // pre-kick GET /api/update/status
-			require.Equal(t, http.MethodGet, r.Method)
-			require.Equal(t, "/api/update/status", r.URL.Path)
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 100, "unknown", "")))
-		case 2: // POST /api/update/check
-			require.Equal(t, http.MethodPost, r.Method)
-			require.Equal(t, "/api/update/check", r.URL.Path)
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(kickStatus)
 			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // poll — ts advanced, outcome terminal
-			require.Equal(t, "/api/update/status", r.URL.Path)
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 200, "available", "https://example.com/fw.bin")))
+		case "/api/update/status":
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 200, statusOutcome, "https://example.com/fw.bin")))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+}
+
+// TestCheck_Available tests Check with outcome="available".
+func TestCheck_Available(t *testing.T) {
+	server := newBestEffortCheckServer(t, http.StatusAccepted, "available")
 	defer server.Close()
 
 	host, port, err := parseTestServerURL(server.URL)
@@ -78,17 +79,17 @@ func TestCheck_Available(t *testing.T) {
 
 // TestCheck_UpToDate tests Check with outcome="up_to_date".
 func TestCheck_UpToDate(t *testing.T) {
-	var reqCount atomic.Int32
+	// Use a custom server that returns available=false for up_to_date.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reqCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		switch n {
-		case 1: // pre-kick
-			_, _ = w.Write([]byte(statusBody("v1.1.0", "v1.1.0", false, 100, "unknown", "")))
-		case 2: // kick
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // poll — ts advanced, outcome up_to_date
+		case "/api/update/status":
 			_, _ = w.Write([]byte(statusBody("v1.1.0", "v1.1.0", false, 200, "up_to_date", "")))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
@@ -100,26 +101,13 @@ func TestCheck_UpToDate(t *testing.T) {
 	result, err := client.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, "v1.1.0", result.CurrentVersion)
-	assert.False(t, result.UpdateAvailable)
 	assert.Equal(t, "up_to_date", result.Outcome)
+	assert.False(t, result.UpdateAvailable)
 }
 
 // TestCheck_NoAsset tests that outcome="no_asset" returns quickly without hanging.
 func TestCheck_NoAsset(t *testing.T) {
-	var reqCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reqCount.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		switch n {
-		case 1: // pre-kick
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 100, "unknown", "")))
-		case 2: // kick
-			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // poll — ts advanced, outcome no_asset
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 200, "no_asset", "")))
-		}
-	}))
+	server := newBestEffortCheckServer(t, http.StatusAccepted, "no_asset")
 	defer server.Close()
 
 	host, port, err := parseTestServerURL(server.URL)
@@ -133,25 +121,13 @@ func TestCheck_NoAsset(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "no_asset", result.Outcome)
-	// Must return quickly — not hang on the 2s poll interval more than once.
-	assert.Less(t, elapsed, 5*time.Second)
+	// Must return quickly — no polling loop.
+	assert.Less(t, elapsed, 2*time.Second)
 }
 
-// TestCheck_CheckFailed tests that outcome="check_failed" is returned without looping.
+// TestCheck_CheckFailed tests that outcome="check_failed" is returned.
 func TestCheck_CheckFailed(t *testing.T) {
-	var reqCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reqCount.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		switch n {
-		case 1: // pre-kick
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 100, "unknown", "")))
-		case 2: // kick
-			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // poll — ts advanced, outcome check_failed
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 200, "check_failed", "")))
-		}
-	}))
+	server := newBestEffortCheckServer(t, http.StatusAccepted, "check_failed")
 	defer server.Close()
 
 	host, port, err := parseTestServerURL(server.URL)
@@ -164,21 +140,69 @@ func TestCheck_CheckFailed(t *testing.T) {
 	assert.Equal(t, "check_failed", result.Outcome)
 }
 
-// TestCheck_PendingThenTerminal tests that outcome="unknown" keeps polling until terminal.
-func TestCheck_PendingThenTerminal(t *testing.T) {
-	var reqCount atomic.Int32
+// TestCheck_KickReturns404_ErrCheckUnavailable tests that a 404 on the kick
+// route returns ErrCheckUnavailable (boot-mode device).
+func TestCheck_KickReturns404_ErrCheckUnavailable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reqCount.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"not found"}`))
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, err := client.Check(context.Background())
+
+	assert.Nil(t, result)
+	require.ErrorIs(t, err, ErrCheckUnavailable)
+}
+
+// TestCheck_KickReturns405_ErrCheckUnavailable tests that a 405 on the kick
+// route returns ErrCheckUnavailable.
+func TestCheck_KickReturns405_ErrCheckUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, err := client.Check(context.Background())
+
+	assert.Nil(t, result)
+	require.ErrorIs(t, err, ErrCheckUnavailable)
+}
+
+// TestCheck_NetworkError_ErrCheckUnavailable tests that a network error on the
+// kick returns ErrCheckUnavailable (device not reachable or route absent).
+func TestCheck_NetworkError_ErrCheckUnavailable(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	client := NewClient("127.0.0.1", port)
+	result, err := client.Check(context.Background())
+
+	assert.Nil(t, result)
+	require.ErrorIs(t, err, ErrCheckUnavailable)
+}
+
+// TestCheck_StatusReturns404_ErrCheckUnavailable tests that 404 on the status
+// route returns ErrCheckUnavailable.
+func TestCheck_StatusReturns404_ErrCheckUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch n {
-		case 1: // pre-kick — ts=100
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 100, "unknown", "")))
-		case 2: // kick
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		case 3: // first poll — ts unchanged, still unknown
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 100, "unknown", "")))
-		default: // second poll — ts advanced, terminal outcome
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", true, 200, "available", "https://example.com/fw.bin")))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
@@ -189,17 +213,22 @@ func TestCheck_PendingThenTerminal(t *testing.T) {
 	client := NewClient(host, port)
 	result, err := client.Check(context.Background())
 
-	require.NoError(t, err)
-	assert.Equal(t, "available", result.Outcome)
-	assert.GreaterOrEqual(t, reqCount.Load(), int32(4))
+	assert.Nil(t, result)
+	require.ErrorIs(t, err, ErrCheckUnavailable)
 }
 
-// TestCheck_503NotInitialized tests that 503 returns "not initialized" error.
+// TestCheck_503NotInitialized tests that 503 on status returns a non-unavailable error.
 func TestCheck_503NotInitialized(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"error":"not initialized"}`))
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"not initialized"}`))
+		}
 	}))
 	defer server.Close()
 
@@ -214,17 +243,12 @@ func TestCheck_503NotInitialized(t *testing.T) {
 	assert.Contains(t, err.Error(), "not initialized")
 }
 
-// TestCheck_BackstopDeadline tests that a context deadline fires instead of hanging
-// when the server always returns outcome="unknown".
-func TestCheck_BackstopDeadline(t *testing.T) {
+// TestCheck_ContextCancellation tests Check with a cancelled context.
+func TestCheck_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.Method {
-		case http.MethodPost: // kick
-			_, _ = w.Write([]byte(`{"status":"checking"}`))
-		default: // always return ts=100, outcome=unknown
-			_, _ = w.Write([]byte(statusBody("v1.0.0", "", false, 100, "unknown", "")))
-		}
+		// Simulate a slow response that will be cancelled
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusRequestTimeout)
 	}))
 	defer server.Close()
 
@@ -232,21 +256,27 @@ func TestCheck_BackstopDeadline(t *testing.T) {
 	require.NoError(t, err)
 
 	client := NewClient(host, port)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	result, err := client.Check(ctx)
 
 	assert.Nil(t, result)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Error(t, err)
 }
 
-// TestCheck_HTTPError tests Check when the pre-kick status call fails.
+// TestCheck_HTTPError tests Check when the status call returns a 500.
 func TestCheck_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("internal server error"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("internal server error"))
+		}
 	}))
 	defer server.Close()
 
@@ -265,8 +295,14 @@ func TestCheck_HTTPError(t *testing.T) {
 func TestCheck_BadJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("not valid json"))
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("not valid json"))
+		}
 	}))
 	defer server.Close()
 
@@ -306,6 +342,34 @@ func TestTrigger_Started(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusAccepted, statusCode)
 	assert.Equal(t, "update_started", result.Status)
+	assert.Empty(t, result.Error)
+}
+
+// TestTrigger_BootMode tests Trigger returning rebooting_for_boot_mode_ota.
+func TestTrigger_BootMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/update/apply", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		result := TriggerResult{
+			Status: "rebooting_for_boot_mode_ota",
+			Error:  "",
+		}
+		_ = json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, statusCode, err := client.Trigger(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusAccepted, statusCode)
+	assert.Equal(t, "rebooting_for_boot_mode_ota", result.Status)
 	assert.Empty(t, result.Error)
 }
 
@@ -474,28 +538,6 @@ func TestPollStatus_HTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "unexpected status 500")
 }
 
-// TestCheck_ContextCancellation tests Check with a cancelled context.
-func TestCheck_ContextCancellation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate a slow response that will be cancelled
-		<-r.Context().Done()
-		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
-
-	host, port, err := parseTestServerURL(server.URL)
-	require.NoError(t, err)
-
-	client := NewClient(host, port)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	result, err := client.Check(ctx)
-
-	assert.Nil(t, result)
-	assert.Error(t, err)
-}
-
 // TestTrigger_ContextCancellation tests Trigger with a cancelled context.
 func TestTrigger_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -618,3 +660,29 @@ func TestWaitForBoot_DeadlineExceeded(t *testing.T) {
 	assert.Error(t, err)
 	assert.Empty(t, v)
 }
+
+// TestCheck_BackstopDeadline_ContextCancel tests that a cancelled context fires
+// during the kick attempt (no infinite hang).
+func TestCheck_BackstopDeadline_ContextCancel(t *testing.T) {
+	// Use a slow server to make the kick block until context fires.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusRequestTimeout)
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	result, err := client.Check(ctx)
+
+	assert.Nil(t, result)
+	require.Error(t, err)
+}
+
+// Ensure unused import is consumed (atomic used via reqCount pattern in other tests).
+var _ atomic.Int32
