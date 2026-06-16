@@ -116,18 +116,25 @@ func updateDevice(device discover.DeviceInfo) error {
 	if checkResult != nil {
 		currentVersion := checkResult.CurrentVersion
 		latestVersion := checkResult.LatestVersion
-		output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
 
 		switch checkResult.Outcome {
+		case ota.OutcomeCheckOnApply:
+			// Device defers the check to apply time (heap-tight boot-mode board).
+			// Skip status polling and go straight to Trigger.
+			output.Info("[%s] device defers update check to apply (boot-mode); applying...", hostname)
 		case "available":
+			output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
 			output.Info("[%s] updating %s → %s", hostname, currentVersion, latestVersion)
 		case "up_to_date":
+			output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
 			output.Success("[%s] already up to date (%s)", hostname, currentVersion)
 			return nil
 		case "no_asset":
+			output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
 			output.Warn("[%s] no firmware published for this board", hostname)
 			return nil
 		case "check_failed":
+			output.Info("[%s] current: %s, latest: %s", hostname, currentVersion, latestVersion)
 			return fmt.Errorf("[%s] update check failed (device could not complete the release check)", hostname)
 		default:
 			return fmt.Errorf("[%s] unexpected update check outcome %q", hostname, checkResult.Outcome)

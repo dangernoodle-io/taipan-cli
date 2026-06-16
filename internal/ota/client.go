@@ -53,6 +53,11 @@ func NewClient(ip string, port int) *Client {
 	}
 }
 
+// OutcomeCheckOnApply is returned by Check when the device signals that the
+// update check will happen during apply (e.g. heap-tight boot-mode boards).
+// The caller should skip status polling and call Trigger directly.
+const OutcomeCheckOnApply = "check_on_apply"
+
 // Check performs a best-effort update status query. It optionally POSTs
 // /api/update/check first (tolerating 404/unsupported), then GETs
 // /api/update/status once and returns whatever the device reports.
@@ -60,7 +65,14 @@ func NewClient(ip string, port int) *Client {
 // If the device does not expose these routes (404 / 405 / connection error),
 // Check returns (nil, ErrCheckUnavailable) so callers can swallow the error
 // and proceed to Trigger directly.
+//
+// If either the POST /api/update/check body or the GET /api/update/status
+// outcome field signals "check_on_apply", Check returns a CheckResult with
+// Outcome == OutcomeCheckOnApply so the caller can go straight to Trigger.
 func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
+	type kickResp struct {
+		Status string `json:"status"`
+	}
 	type statusResp struct {
 		Current     string `json:"current"`
 		Latest      string `json:"latest"`
@@ -75,12 +87,19 @@ func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
 	if err != nil {
 		return nil, ErrCheckUnavailable
 	}
-	kickResp, kickErr := c.httpClient.Do(kickReq)
+	kickRespHTTP, kickErr := c.httpClient.Do(kickReq)
 	if kickErr == nil {
-		_, _ = io.ReadAll(kickResp.Body)
-		_ = kickResp.Body.Close()
-		if kickResp.StatusCode == http.StatusNotFound || kickResp.StatusCode == http.StatusMethodNotAllowed {
+		kickBody, _ := io.ReadAll(kickRespHTTP.Body)
+		_ = kickRespHTTP.Body.Close()
+		if kickRespHTTP.StatusCode == http.StatusNotFound || kickRespHTTP.StatusCode == http.StatusMethodNotAllowed {
 			return nil, ErrCheckUnavailable
+		}
+		// HTTP 200 with check_on_apply directive: skip status poll, go straight to apply.
+		if kickRespHTTP.StatusCode == http.StatusOK {
+			var k kickResp
+			if err := json.Unmarshal(kickBody, &k); err == nil && k.Status == OutcomeCheckOnApply {
+				return &CheckResult{Outcome: OutcomeCheckOnApply}, nil
+			}
 		}
 	}
 	// Network error on kick — device may not support the route at all.
@@ -114,6 +133,11 @@ func (c *Client) Check(ctx context.Context) (*CheckResult, error) {
 	var s statusResp
 	if err := json.Unmarshal(body, &s); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	// Status outcome may also signal check_on_apply (available=false, outcome="check_on_apply").
+	if s.Outcome == OutcomeCheckOnApply {
+		return &CheckResult{Outcome: OutcomeCheckOnApply}, nil
 	}
 
 	return &CheckResult{
