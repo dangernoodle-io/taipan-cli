@@ -327,3 +327,124 @@ func TestPollPullUpdate_NetworkErrorAfterProgress(t *testing.T) {
 	// After seeing progress, a network error is success.
 	assert.NoError(t, err)
 }
+
+// TestUpdateDevice_CheckOnApply_FromKick tests that when POST /api/update/check
+// returns HTTP 200 {"status":"check_on_apply"}, updateDevice skips polling and
+// calls /api/update/apply directly (no GET /api/update/status).
+func TestUpdateDevice_CheckOnApply_FromKick(t *testing.T) {
+	var applyCount atomic.Int32
+	var statusCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"check_on_apply"}`))
+		case "/api/update/status":
+			statusCount.Add(1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(checkStatusBody("v1.0.0", "v1.1.0", 200, "check_on_apply")))
+		case "/api/update/apply":
+			applyCount.Add(1)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"rebooting_for_boot_mode_ota"}`))
+		case "/api/update/progress":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"version":"v1.1.0"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port := parseTestHostPort(t, server.URL)
+	dev := discover.DeviceInfo{Hostname: "test-s2", IP: host, Port: port}
+
+	err := updateDevice(dev)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), applyCount.Load(), "apply must be called exactly once")
+	assert.Equal(t, int32(0), statusCount.Load(), "status must not be polled for check_on_apply")
+}
+
+// TestUpdateDevice_CheckOnApply_FromStatusOutcome tests that when GET
+// /api/update/status returns outcome="check_on_apply", updateDevice proceeds
+// directly to /api/update/apply without further polling.
+func TestUpdateDevice_CheckOnApply_FromStatusOutcome(t *testing.T) {
+	var applyCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		case "/api/update/status":
+			_, _ = w.Write([]byte(checkStatusBody("v1.0.0", "v1.0.0", 200, "check_on_apply")))
+		case "/api/update/apply":
+			applyCount.Add(1)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"rebooting_for_boot_mode_ota"}`))
+		case "/api/update/progress":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"version":"v1.1.0"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port := parseTestHostPort(t, server.URL)
+	dev := discover.DeviceInfo{Hostname: "test-s2", IP: host, Port: port}
+
+	err := updateDevice(dev)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), applyCount.Load(), "apply must be called exactly once")
+}
+
+// TestUpdateDevice_NormalCheckThenApply_PullPath verifies the existing
+// check → status-available → apply → poll flow still works unchanged.
+func TestUpdateDevice_NormalCheckThenApply_PullPath(t *testing.T) {
+	var applyCount atomic.Int32
+	var progressCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		case "/api/update/status":
+			_, _ = w.Write([]byte(checkStatusBody("v1.0.0", "v1.1.0", 200, "available")))
+		case "/api/update/apply":
+			applyCount.Add(1)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"update_started"}`))
+		case "/api/update/progress":
+			n := progressCount.Add(1)
+			if n == 1 {
+				_, _ = w.Write([]byte(`{"state":"updating","in_progress":true,"progress_pct":50}`))
+			} else {
+				_, _ = w.Write([]byte(`{"state":"complete","in_progress":false,"progress_pct":100}`))
+			}
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"version":"v1.1.0"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port := parseTestHostPort(t, server.URL)
+	dev := discover.DeviceInfo{Hostname: "test-device", IP: host, Port: port}
+
+	err := updateDevice(dev)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), applyCount.Load(), "apply must be called exactly once")
+	assert.GreaterOrEqual(t, progressCount.Load(), int32(1), "progress must be polled at least once")
+}

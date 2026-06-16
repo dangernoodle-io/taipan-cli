@@ -684,5 +684,66 @@ func TestCheck_BackstopDeadline_ContextCancel(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestCheck_CheckOnApply_FromKickBody tests that HTTP 200 with
+// {"status":"check_on_apply"} on POST /api/update/check returns OutcomeCheckOnApply
+// without fetching /api/update/status.
+func TestCheck_CheckOnApply_FromKickBody(t *testing.T) {
+	var statusCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"check_on_apply"}`))
+		case "/api/update/status":
+			statusCalls.Add(1)
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.1.0", false, 200, "check_on_apply", "")))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, err := client.Check(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, OutcomeCheckOnApply, result.Outcome)
+	// status endpoint must NOT be called when kick already returns check_on_apply.
+	assert.Equal(t, int32(0), statusCalls.Load(), "GET /api/update/status must not be called")
+}
+
+// TestCheck_CheckOnApply_FromStatusOutcome tests that outcome="check_on_apply" on
+// GET /api/update/status (after a normal 202 kick) returns OutcomeCheckOnApply.
+func TestCheck_CheckOnApply_FromStatusOutcome(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/update/check":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"checking"}`))
+		case "/api/update/status":
+			_, _ = w.Write([]byte(statusBody("v1.0.0", "v1.0.0", false, 200, "check_on_apply", "")))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	host, port, err := parseTestServerURL(server.URL)
+	require.NoError(t, err)
+
+	client := NewClient(host, port)
+	result, err := client.Check(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, OutcomeCheckOnApply, result.Outcome)
+}
+
 // Ensure unused import is consumed (atomic used via reqCount pattern in other tests).
 var _ atomic.Int32
