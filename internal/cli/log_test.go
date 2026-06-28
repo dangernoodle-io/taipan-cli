@@ -43,34 +43,16 @@ func newSSEServer(t *testing.T, body string) *httptest.Server {
 	}))
 }
 
-// TestStreamDevice_SingleDevice verifies that streamDevice outputs plain payload without prefix.
-func TestStreamDevice_SingleDevice(t *testing.T) {
-	sseBody := ": connected\n\ndata: line one\n\ndata: line two\n\n"
-	server := newSSEServer(t, sseBody)
-	defer server.Close()
-
-	// Extract host and port from server URL
-	device := discover.DeviceInfo{
-		Hostname: "test-device.local",
-		IP:       "127.0.0.1",
-		Port:     extractPortFromURL(t, server.URL),
-	}
-
-	var mu sync.Mutex
-	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu, func() {})
-		require.NoError(t, err)
-	})
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	assert.Equal(t, 2, len(lines))
-	assert.Equal(t, "line one", lines[0])
-	assert.Equal(t, "line two", lines[1])
+// jsonData returns a valid JSON log event data line.
+func jsonData(level, tag, msg string) string {
+	return fmt.Sprintf(`{"ts":1000,"level":%q,"tag":%q,"msg":%q}`, level, tag, msg)
 }
 
-// TestStreamDevice_SkipsCommentsAndEmptyLines verifies SSE comments and empty lines are skipped.
-func TestStreamDevice_SkipsCommentsAndEmptyLines(t *testing.T) {
-	sseBody := ": comment 1\n\ndata: line one\n\n: comment 2\n\n\n\ndata: line two\n\n: comment 3\n\n"
+// TestStreamDevice_SingleDevice verifies that streamDevice outputs formatted log without prefix.
+func TestStreamDevice_SingleDevice(t *testing.T) {
+	d1 := jsonData("I", "wifi", "connected")
+	d2 := jsonData("W", "heap", "low memory")
+	sseBody := "event: log\ndata: " + d1 + "\nid: 1\n\nevent: log\ndata: " + d2 + "\nid: 2\n\n"
 	server := newSSEServer(t, sseBody)
 	defer server.Close()
 
@@ -81,20 +63,48 @@ func TestStreamDevice_SkipsCommentsAndEmptyLines(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	assert.Equal(t, 2, len(lines))
-	assert.Equal(t, "line one", lines[0])
-	assert.Equal(t, "line two", lines[1])
+	assert.Equal(t, "I wifi: connected", lines[0])
+	assert.Equal(t, "W heap: low memory", lines[1])
+}
+
+// TestStreamDevice_SkipsCommentsAndEmptyLines verifies SSE comments, event:, and id: lines are skipped.
+func TestStreamDevice_SkipsCommentsAndEmptyLines(t *testing.T) {
+	d1 := jsonData("I", "wifi", "connected")
+	d2 := jsonData("E", "mqtt", "reconnect")
+	sseBody := ": comment 1\n\nevent: log\ndata: " + d1 + "\nid: 1\n\n: comment 2\n\n\n\nevent: log\ndata: " + d2 + "\nid: 2\n\n: comment 3\n\n"
+	server := newSSEServer(t, sseBody)
+	defer server.Close()
+
+	device := discover.DeviceInfo{
+		Hostname: "test-device.local",
+		IP:       "127.0.0.1",
+		Port:     extractPortFromURL(t, server.URL),
+	}
+
+	var mu sync.Mutex
+	out := captureStdout(t, func() {
+		err := streamDevice(context.Background(), device, nil, &mu, func() {})
+		require.NoError(t, err)
+	})
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	assert.Equal(t, 2, len(lines))
+	assert.Equal(t, "I wifi: connected", lines[0])
+	assert.Equal(t, "E mqtt: reconnect", lines[1])
 }
 
 // TestStreamDevice_MultiDevice verifies that prefixFn adds hostname prefix to each line.
 func TestStreamDevice_MultiDevice(t *testing.T) {
-	sseBody := "data: payload one\n\ndata: payload two\n\n"
+	d1 := jsonData("I", "pool", "accepted")
+	d2 := jsonData("D", "hash", "nonce found")
+	sseBody := "event: log\ndata: " + d1 + "\nid: 1\n\nevent: log\ndata: " + d2 + "\nid: 2\n\n"
 	server := newSSEServer(t, sseBody)
 	defer server.Close()
 
@@ -109,15 +119,15 @@ func TestStreamDevice_MultiDevice(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		err := streamDevice(context.Background(), device, prefixFn, &mu, func() {})
 		require.NoError(t, err)
 	})
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	assert.Equal(t, 2, len(lines))
-	assert.Equal(t, "[miner-01] payload one", lines[0])
-	assert.Equal(t, "[miner-01] payload two", lines[1])
+	assert.Equal(t, "[miner-01] I pool: accepted", lines[0])
+	assert.Equal(t, "[miner-01] D hash: nonce found", lines[1])
 }
 
 // TestStreamDevice_HTTPError verifies that non-200 status codes return an error.
@@ -169,7 +179,9 @@ func TestStreamDevice_ContextCancellation(t *testing.T) {
 
 // TestStreamDevice_MutexSerialization verifies that the mutex is held during output.
 func TestStreamDevice_MutexSerialization(t *testing.T) {
-	sseBody := "data: line one\n\ndata: line two\n\n"
+	d1 := jsonData("I", "sys", "started")
+	d2 := jsonData("I", "sys", "ready")
+	sseBody := "event: log\ndata: " + d1 + "\nid: 1\n\nevent: log\ndata: " + d2 + "\nid: 2\n\n"
 	server := newSSEServer(t, sseBody)
 	defer server.Close()
 
@@ -184,16 +196,15 @@ func TestStreamDevice_MutexSerialization(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		err := streamDevice(context.Background(), device, prefixFn, &mu, func() {})
 		require.NoError(t, err)
 	})
 
-	// Verify output was produced (mutex was used for synchronization)
-	lines := strings.Split(strings.TrimSpace(output), "\n")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	assert.Equal(t, 2, len(lines))
-	assert.Equal(t, "[test-worker] line one", lines[0])
-	assert.Equal(t, "[test-worker] line two", lines[1])
+	assert.Equal(t, "[test-worker] I sys: started", lines[0])
+	assert.Equal(t, "[test-worker] I sys: ready", lines[1])
 }
 
 // TestStreamDevice_EmptyResponse verifies handling of empty response body.
@@ -208,17 +219,21 @@ func TestStreamDevice_EmptyResponse(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
-	assert.Equal(t, "", strings.TrimSpace(output))
+	assert.Equal(t, "", strings.TrimSpace(out))
 }
 
-// TestStreamDevice_MixedFormatLines verifies that only "data: " prefixed lines are output.
+// TestStreamDevice_MixedFormatLines verifies that only "data: " prefixed lines produce output.
 func TestStreamDevice_MixedFormatLines(t *testing.T) {
-	sseBody := "data: valid line\n\nid: 123\n\ndata: another valid\n\nevent: message\n\ndata: final line\n\n"
+	d1 := jsonData("I", "wifi", "connected")
+	d2 := jsonData("I", "pool", "accepted")
+	d3 := jsonData("D", "hash", "done")
+	// interleave event:/id: fields between data lines
+	sseBody := "event: log\ndata: " + d1 + "\nid: 1\n\nid: 2\n\nevent: log\ndata: " + d2 + "\nid: 3\n\nevent: log\ndata: " + d3 + "\nid: 4\n\n"
 	server := newSSEServer(t, sseBody)
 	defer server.Close()
 
@@ -229,21 +244,21 @@ func TestStreamDevice_MixedFormatLines(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	assert.Equal(t, 3, len(lines))
-	assert.Equal(t, "valid line", lines[0])
-	assert.Equal(t, "another valid", lines[1])
-	assert.Equal(t, "final line", lines[2])
+	assert.Equal(t, "I wifi: connected", lines[0])
+	assert.Equal(t, "I pool: accepted", lines[1])
+	assert.Equal(t, "D hash: done", lines[2])
 }
 
-// TestStreamDevice_DataLineWithoutPrefix verifies that malformed data lines are skipped.
-func TestStreamDevice_DataLineWithoutPrefix(t *testing.T) {
-	sseBody := "data: valid line\n\ndata valid\n\ndata:another valid\n\n"
+// TestStreamDevice_MalformedDataLine verifies that non-JSON data lines are printed raw without crashing.
+func TestStreamDevice_MalformedDataLine(t *testing.T) {
+	sseBody := "data: not-json-at-all\n\nevent: log\ndata: " + jsonData("I", "sys", "ok") + "\nid: 2\n\n"
 	server := newSSEServer(t, sseBody)
 	defer server.Close()
 
@@ -254,22 +269,21 @@ func TestStreamDevice_DataLineWithoutPrefix(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	// "data:another valid" is missing the space after colon, so it's skipped
-	assert.Equal(t, 1, len(lines))
-	assert.Equal(t, "valid line", lines[0])
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	assert.Equal(t, 2, len(lines))
+	assert.Equal(t, "not-json-at-all", lines[0]) // raw fallback
+	assert.Equal(t, "I sys: ok", lines[1])
 }
 
-// TestStreamDevice_LongPayload verifies that long payloads are handled correctly.
-func TestStreamDevice_LongPayload(t *testing.T) {
-	longPayload := strings.Repeat("x", 10000)
-	sseBody := "data: " + longPayload + "\n\n"
-	server := newSSEServer(t, sseBody)
+// TestStreamDevice_FullSSEFrame verifies parsing of a complete event:/data:/id: frame.
+func TestStreamDevice_FullSSEFrame(t *testing.T) {
+	frame := "event: log\ndata: {\"ts\":1719532800000,\"level\":\"I\",\"tag\":\"x\",\"msg\":\"hello\"}\nid: 1\n\n"
+	server := newSSEServer(t, frame)
 	defer server.Close()
 
 	device := discover.DeviceInfo{
@@ -279,19 +293,34 @@ func TestStreamDevice_LongPayload(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		err := streamDevice(context.Background(), device, nil, &mu, func() {})
 		require.NoError(t, err)
 	})
 
-	assert.Equal(t, longPayload, strings.TrimSpace(output))
+	assert.Equal(t, "I x: hello", strings.TrimSpace(out))
 }
 
-// TestStreamDevice_SpecialCharactersInPayload verifies that special characters are preserved.
-func TestStreamDevice_SpecialCharactersInPayload(t *testing.T) {
-	specialPayload := "line with [brackets] {braces} and special chars: !@#$%^&*()"
-	sseBody := "data: " + specialPayload + "\n\n"
-	server := newSSEServer(t, sseBody)
+// TestFormatLogEvent_Valid verifies correct formatting of a valid JSON payload.
+func TestFormatLogEvent_Valid(t *testing.T) {
+	payload := `{"ts":1000,"level":"W","tag":"heap","msg":"low memory"}`
+	assert.Equal(t, "W heap: low memory", formatLogEvent(payload))
+}
+
+// TestFormatLogEvent_Malformed verifies that malformed JSON returns the raw payload.
+func TestFormatLogEvent_Malformed(t *testing.T) {
+	payload := "this is not json"
+	assert.Equal(t, payload, formatLogEvent(payload))
+}
+
+// TestStreamDevice_EndpointPath verifies the request targets /api/events?topic=log.
+func TestStreamDevice_EndpointPath(t *testing.T) {
+	var capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.RequestURI()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "")
+	}))
 	defer server.Close()
 
 	device := discover.DeviceInfo{
@@ -301,12 +330,8 @@ func TestStreamDevice_SpecialCharactersInPayload(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	output := captureStdout(t, func() {
-		err := streamDevice(context.Background(), device, nil, &mu, func() {})
-		require.NoError(t, err)
-	})
-
-	assert.Equal(t, specialPayload, strings.TrimSpace(output))
+	_ = streamDevice(context.Background(), device, nil, &mu, func() {})
+	assert.Equal(t, "/api/events?topic=log", capturedPath)
 }
 
 // extractPortFromURL is a helper to extract the port number from an httptest.Server URL.
