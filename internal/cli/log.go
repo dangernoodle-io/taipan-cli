@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +23,14 @@ var (
 	logAll     bool
 	logTimeout int
 )
+
+// logEvent is the structured JSON payload emitted by breadboard's /api/events?topic=log endpoint.
+type logEvent struct {
+	Ts    int64  `json:"ts"`
+	Level string `json:"level"`
+	Tag   string `json:"tag"`
+	Msg   string `json:"msg"`
+}
 
 var logCmd = &cobra.Command{
 	Use:   "logs",
@@ -87,13 +96,14 @@ func runLog(cmd *cobra.Command, args []string) error {
 }
 
 func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func(string) string, mu *sync.Mutex, stopConn func()) error {
-	url := fmt.Sprintf("http://%s:%d/api/logs", device.IP, device.Port)
+	url := fmt.Sprintf("http://%s:%d/api/events?topic=log", device.IP, device.Port)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		stopConn()
 		return err
 	}
+	req.Header.Set("Accept", "text/event-stream")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -115,12 +125,13 @@ func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Skip empty lines and SSE comments
-		if line == "" || strings.HasPrefix(line, ":") {
+		// Skip empty lines, SSE comments, event: and id: fields
+		if line == "" || strings.HasPrefix(line, ":") ||
+			strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") {
 			continue
 		}
 
-		// Strip "data: " prefix
+		// Only process data: lines
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -132,12 +143,14 @@ func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func
 			connStopped = true
 		}
 
+		formatted := formatLogEvent(payload)
+
 		if prefixFn != nil {
 			mu.Lock()
-			fmt.Println(prefixFn(device.Hostname) + payload)
+			fmt.Println(prefixFn(device.Hostname) + formatted)
 			mu.Unlock()
 		} else {
-			fmt.Println(payload)
+			fmt.Println(formatted)
 		}
 	}
 
@@ -150,4 +163,14 @@ func streamDevice(ctx context.Context, device discover.DeviceInfo, prefixFn func
 	}
 
 	return nil
+}
+
+// formatLogEvent parses a JSON log event payload and returns a formatted terminal line.
+// On parse failure it returns the raw payload so nothing is silently dropped.
+func formatLogEvent(payload string) string {
+	var evt logEvent
+	if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+		return payload
+	}
+	return fmt.Sprintf("%s %s: %s", evt.Level, evt.Tag, evt.Msg)
 }
